@@ -1,214 +1,114 @@
-use std::fmt::Write;
+//! SBPL profile generation using compile-time templates
+
 use std::path::Path;
+
+use askama::Template;
 
 use crate::config::SandboxConfig;
 use crate::error::SandboxResult;
 use crate::network::NetworkPolicy;
 
-/// Generate an SBPL profile from sandbox configuration
-pub fn generate_profile<N: NetworkPolicy>(config: &SandboxConfig<N>) -> SandboxResult<String> {
-    let mut profile = String::new();
-
-    // Version declaration (required)
-    writeln!(profile, "(version 1)").unwrap();
-
-    // Default deny - most secure approach
-    writeln!(profile, "(deny default)").unwrap();
-
-    tracing::debug!("sandbox policy: deny all by default");
-
-    // Allow basic system operations needed for most programs
-    write_system_basics(&mut profile);
-
-    // Allow configured readable paths
-    for path in config.readable_paths() {
-        tracing::debug!(path = %path.display(), "sandbox: allow read");
-        write_read_path(&mut profile, path);
-    }
-
-    // Allow configured writable paths
-    for path in config.writable_paths() {
-        tracing::debug!(path = %path.display(), "sandbox: allow write");
-        write_write_path(&mut profile, path);
-    }
-
-    // Allow configured executable paths
-    for path in config.executable_paths() {
-        tracing::debug!(path = %path.display(), "sandbox: allow exec");
-        write_exec_path(&mut profile, path);
-    }
-
-    // Allow working directory access
-    tracing::debug!(path = %config.working_dir().display(), "sandbox: allow write (working dir)");
-    write_write_path(&mut profile, config.working_dir());
-
-    // Python venv configuration
-    if let Some(python_config) = config.python() {
-        tracing::debug!(path = %python_config.venv().path().display(), "sandbox: allow python venv");
-        write_python_paths(&mut profile, python_config.venv().path());
-    }
-
-    // Network configuration
-    write_network_policy::<N>(&mut profile);
-
-    Ok(profile)
+/// Network mode for SBPL profile
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NetworkMode {
+    /// Deny all network access
+    Deny,
+    /// Allow all network access
+    Allow,
+    /// Allow only localhost (for proxy)
+    Proxy,
 }
 
-/// Write network policy rules to the profile
-fn write_network_policy<N: NetworkPolicy>(profile: &mut String) {
-    // Check if the policy is DenyAll or AllowAll at compile time isn't possible,
-    // so we use a marker trait approach or just always allow localhost for proxy
-    // For now, we'll add a helper to check policy type at runtime
+/// SBPL profile template
+#[derive(Template)]
+#[template(path = "sandbox.txt", escape = "none")]
+struct SandboxProfile {
+    readable_paths: Vec<String>,
+    writable_paths: Vec<String>,
+    executable_paths: Vec<String>,
+    working_dir: String,
+    python_venv_path: Option<String>,
+    network_mode: String,
+}
 
-    // For DenyAll: deny all network
-    // For AllowAll: allow all network
-    // For AllowList/CustomPolicy: allow localhost only (for proxy)
-
-    // Since we can't check the concrete type at runtime easily without TypeId,
-    // we'll provide separate profile generation methods
-
-    // Default: deny all network (safest default)
-    tracing::debug!("sandbox: deny network");
-    writeln!(profile, "(deny network*)").unwrap();
+/// Generate an SBPL profile from sandbox configuration
+pub fn generate_profile<N: NetworkPolicy>(config: &SandboxConfig<N>) -> SandboxResult<String> {
+    generate_profile_with_mode(config, NetworkMode::Deny)
 }
 
 /// Generate a profile that allows network via localhost proxy
 pub fn generate_profile_with_proxy<N: NetworkPolicy>(
     config: &SandboxConfig<N>,
-    proxy_port: u16,
+    _proxy_port: u16,
 ) -> SandboxResult<String> {
-    let mut profile = String::new();
+    generate_profile_with_mode(config, NetworkMode::Proxy)
+}
 
-    // Version declaration (required)
-    writeln!(profile, "(version 1)").unwrap();
+/// Generate a profile with the specified network mode
+fn generate_profile_with_mode<N: NetworkPolicy>(
+    config: &SandboxConfig<N>,
+    network_mode: NetworkMode,
+) -> SandboxResult<String> {
+    // Log the configuration
+    tracing::debug!("sandbox policy: deny all by default");
 
-    // Default deny - most secure approach
-    writeln!(profile, "(deny default)").unwrap();
-
-    tracing::debug!("sandbox policy: deny all by default (proxy mode)");
-
-    // Allow basic system operations needed for most programs
-    write_system_basics(&mut profile);
-
-    // Allow configured readable paths
     for path in config.readable_paths() {
         tracing::debug!(path = %path.display(), "sandbox: allow read");
-        write_read_path(&mut profile, path);
     }
 
-    // Allow configured writable paths
     for path in config.writable_paths() {
         tracing::debug!(path = %path.display(), "sandbox: allow write");
-        write_write_path(&mut profile, path);
     }
 
-    // Allow configured executable paths
     for path in config.executable_paths() {
         tracing::debug!(path = %path.display(), "sandbox: allow exec");
-        write_exec_path(&mut profile, path);
     }
 
-    // Allow working directory access
     tracing::debug!(path = %config.working_dir().display(), "sandbox: allow write (working dir)");
-    write_write_path(&mut profile, config.working_dir());
 
-    // Python venv configuration
     if let Some(python_config) = config.python() {
         tracing::debug!(path = %python_config.venv().path().display(), "sandbox: allow python venv");
-        write_python_paths(&mut profile, python_config.venv().path());
     }
 
-    // Allow network to localhost only (for proxy)
-    tracing::debug!(proxy_port = proxy_port, "sandbox: allow network to localhost proxy");
-    writeln!(profile, "(allow network* (remote ip \"localhost:{}\"))", proxy_port).unwrap();
-    writeln!(profile, "(allow network* (remote ip \"127.0.0.1:{}\"))", proxy_port).unwrap();
-    // Also allow any localhost connection for flexibility
-    writeln!(profile, "(allow network* (remote ip \"localhost:*\"))").unwrap();
-    writeln!(profile, "(allow network* (remote ip \"127.0.0.1:*\"))").unwrap();
+    match network_mode {
+        NetworkMode::Deny => tracing::debug!("sandbox: deny network"),
+        NetworkMode::Allow => tracing::debug!("sandbox: allow network"),
+        NetworkMode::Proxy => tracing::debug!("sandbox: allow network to localhost proxy"),
+    }
+
+    // Prepare template data
+    let template = SandboxProfile {
+        readable_paths: config
+            .readable_paths()
+            .iter()
+            .map(|p| escape_path(p))
+            .collect(),
+        writable_paths: config
+            .writable_paths()
+            .iter()
+            .map(|p| escape_path(p))
+            .collect(),
+        executable_paths: config
+            .executable_paths()
+            .iter()
+            .map(|p| escape_path(p))
+            .collect(),
+        working_dir: escape_path(config.working_dir()),
+        python_venv_path: config.python().map(|p| escape_path(p.venv().path())),
+        network_mode: match network_mode {
+            NetworkMode::Deny => "deny".to_string(),
+            NetworkMode::Allow => "allow".to_string(),
+            NetworkMode::Proxy => "proxy".to_string(),
+        },
+    };
+
+    let profile = template.render().map_err(|e| {
+        crate::error::SandboxError::InvalidProfile(format!("Template render error: {}", e))
+    })?;
+
+    tracing::debug!("Generated SBPL profile:\n{}", profile);
 
     Ok(profile)
-}
-
-fn write_system_basics(profile: &mut String) {
-    // Allow necessary Mach and sysctl operations
-    writeln!(profile, "(allow mach*)").unwrap();
-    writeln!(profile, "(allow sysctl-read)").unwrap();
-    writeln!(profile, "(allow iokit-open)").unwrap();
-
-    // Allow reading all files - macOS processes need access to dyld cache,
-    // system libraries, and other paths that are hard to enumerate.
-    // Security is enforced via write restrictions and network policy.
-    writeln!(profile, "(allow file-read*)").unwrap();
-
-    // Allow write to temp directories only
-    writeln!(profile, r#"(allow file-write* (subpath "/private/tmp"))"#).unwrap();
-    writeln!(profile, r#"(allow file-write* (subpath "/tmp"))"#).unwrap();
-    writeln!(profile, r#"(allow file-write* (subpath "/var/folders"))"#).unwrap();
-    writeln!(profile, r#"(allow file-write* (subpath "/private/var/folders"))"#).unwrap();
-
-    // Allow write to /dev for stdio
-    writeln!(profile, r#"(allow file-write* (subpath "/dev"))"#).unwrap();
-
-    // Allow process operations
-    writeln!(profile, "(allow process-fork)").unwrap();
-    writeln!(profile, "(allow process-exec)").unwrap();
-
-    // Allow signal operations
-    writeln!(profile, "(allow signal)").unwrap();
-
-    // Allow IPC
-    writeln!(profile, "(allow ipc-posix*)").unwrap();
-
-    // Allow file locking
-    writeln!(profile, "(allow file-lock)").unwrap();
-}
-
-fn write_read_path(profile: &mut String, path: &Path) {
-    let escaped = escape_path(path);
-    writeln!(profile, r#"(allow file-read* (subpath "{}"))"#, escaped).unwrap();
-}
-
-fn write_write_path(profile: &mut String, path: &Path) {
-    let escaped = escape_path(path);
-    writeln!(profile, r#"(allow file-read* (subpath "{}"))"#, escaped).unwrap();
-    writeln!(profile, r#"(allow file-write* (subpath "{}"))"#, escaped).unwrap();
-}
-
-fn write_exec_path(profile: &mut String, path: &Path) {
-    let escaped = escape_path(path);
-    writeln!(profile, r#"(allow file-read* (literal "{}"))"#, escaped).unwrap();
-    writeln!(profile, r#"(allow process-exec (literal "{}"))"#, escaped).unwrap();
-}
-
-fn write_python_paths(profile: &mut String, venv_path: &Path) {
-    let escaped = escape_path(venv_path);
-
-    // Allow full access to venv directory (for pip install)
-    writeln!(profile, r#"(allow file-read* (subpath "{}"))"#, escaped).unwrap();
-    writeln!(profile, r#"(allow file-write* (subpath "{}"))"#, escaped).unwrap();
-    writeln!(profile, r#"(allow process-exec (subpath "{}"))"#, escaped).unwrap();
-
-    // Allow access to Homebrew python if present
-    writeln!(
-        profile,
-        r#"(allow file-read* (subpath "/opt/homebrew/Cellar/python"))"#
-    )
-    .unwrap();
-    writeln!(
-        profile,
-        r#"(allow process-exec (subpath "/opt/homebrew/Cellar/python"))"#
-    )
-    .unwrap();
-    writeln!(
-        profile,
-        r#"(allow file-read* (subpath "/opt/homebrew/Frameworks/Python.framework"))"#
-    )
-    .unwrap();
-    writeln!(
-        profile,
-        r#"(allow process-exec (subpath "/opt/homebrew/Frameworks/Python.framework"))"#
-    )
-    .unwrap();
 }
 
 fn escape_path(path: &Path) -> String {

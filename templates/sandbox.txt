@@ -1,0 +1,64 @@
+(version 1)
+(deny default)
+
+; System basics
+(allow mach*)
+(allow sysctl-read)
+(allow iokit-open)
+
+; Allow reading all files (required for dyld, system libs)
+(allow file-read*)
+
+; Temp directories
+(allow file-write* (subpath "/private/tmp"))
+(allow file-write* (subpath "/tmp"))
+(allow file-write* (subpath "/var/folders"))
+(allow file-write* (subpath "/private/var/folders"))
+
+; stdio
+(allow file-write* (subpath "/dev"))
+
+; Process operations
+(allow process-fork)
+(allow process-exec)
+(allow signal)
+(allow ipc-posix*)
+(allow file-lock)
+
+; Configured readable paths
+{% for path in readable_paths %}
+(allow file-read* (subpath "{{ path }}"))
+{% endfor %}
+; Configured writable paths
+{% for path in writable_paths %}
+(allow file-read* (subpath "{{ path }}"))
+(allow file-write* (subpath "{{ path }}"))
+{% endfor %}
+; Configured executable paths
+{% for path in executable_paths %}
+(allow file-read* (literal "{{ path }}"))
+(allow process-exec (literal "{{ path }}"))
+{% endfor %}
+; Working directory
+(allow file-read* (subpath "{{ working_dir }}"))
+(allow file-write* (subpath "{{ working_dir }}"))
+
+{% if let Some(venv_path) = python_venv_path %}
+; Python venv
+(allow file-read* (subpath "{{ venv_path }}"))
+(allow file-write* (subpath "{{ venv_path }}"))
+(allow process-exec (subpath "{{ venv_path }}"))
+(allow file-read* (subpath "/opt/homebrew/Cellar/python"))
+(allow process-exec (subpath "/opt/homebrew/Cellar/python"))
+(allow file-read* (subpath "/opt/homebrew/Frameworks/Python.framework"))
+(allow process-exec (subpath "/opt/homebrew/Frameworks/Python.framework"))
+{% endif %}
+; Network policy
+{% if network_mode == "deny" %}
+(deny network*)
+{% else if network_mode == "allow" %}
+(allow network*)
+{% else if network_mode == "proxy" %}
+(allow network* (remote ip "localhost:*"))
+(allow network* (remote ip "127.0.0.1:*"))
+{% endif %}

@@ -24,6 +24,9 @@ tracing = "0.1"
 # Async utilities
 futures-lite = "2"
 
+# Compile-time templates
+askama = "0.12"
+
 # Python executable detection (optional)
 [dependencies.which]
 version = "7"
