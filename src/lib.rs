@@ -76,6 +76,7 @@ pub use config::{
 pub use error::{SandboxError, SandboxResult};
 pub use network::{
     AllowAll, AllowList, ConnectionDirection, CustomPolicy, DenyAll, DomainRequest, NetworkPolicy,
+    NetworkProxy,
 };
 pub use platform::Child;
 pub use python::VenvManager;

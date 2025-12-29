@@ -21,6 +21,9 @@ tempfile = "3"
 # Logging
 tracing = "0.1"
 
+# Async utilities
+futures-lite = "2"
+
 # Python executable detection (optional)
 [dependencies.which]
 version = "7"

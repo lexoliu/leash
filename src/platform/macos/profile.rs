@@ -48,10 +48,83 @@ pub fn generate_profile<N: NetworkPolicy>(config: &SandboxConfig<N>) -> SandboxR
         write_python_paths(&mut profile, python_config.venv().path());
     }
 
-    // Network configuration - deny all by default
-    // TODO: Implement proxy-based network filtering for callback policies
+    // Network configuration
+    write_network_policy::<N>(&mut profile);
+
+    Ok(profile)
+}
+
+/// Write network policy rules to the profile
+fn write_network_policy<N: NetworkPolicy>(profile: &mut String) {
+    // Check if the policy is DenyAll or AllowAll at compile time isn't possible,
+    // so we use a marker trait approach or just always allow localhost for proxy
+    // For now, we'll add a helper to check policy type at runtime
+
+    // For DenyAll: deny all network
+    // For AllowAll: allow all network
+    // For AllowList/CustomPolicy: allow localhost only (for proxy)
+
+    // Since we can't check the concrete type at runtime easily without TypeId,
+    // we'll provide separate profile generation methods
+
+    // Default: deny all network (safest default)
     tracing::debug!("sandbox: deny network");
     writeln!(profile, "(deny network*)").unwrap();
+}
+
+/// Generate a profile that allows network via localhost proxy
+pub fn generate_profile_with_proxy<N: NetworkPolicy>(
+    config: &SandboxConfig<N>,
+    proxy_port: u16,
+) -> SandboxResult<String> {
+    let mut profile = String::new();
+
+    // Version declaration (required)
+    writeln!(profile, "(version 1)").unwrap();
+
+    // Default deny - most secure approach
+    writeln!(profile, "(deny default)").unwrap();
+
+    tracing::debug!("sandbox policy: deny all by default (proxy mode)");
+
+    // Allow basic system operations needed for most programs
+    write_system_basics(&mut profile);
+
+    // Allow configured readable paths
+    for path in config.readable_paths() {
+        tracing::debug!(path = %path.display(), "sandbox: allow read");
+        write_read_path(&mut profile, path);
+    }
+
+    // Allow configured writable paths
+    for path in config.writable_paths() {
+        tracing::debug!(path = %path.display(), "sandbox: allow write");
+        write_write_path(&mut profile, path);
+    }
+
+    // Allow configured executable paths
+    for path in config.executable_paths() {
+        tracing::debug!(path = %path.display(), "sandbox: allow exec");
+        write_exec_path(&mut profile, path);
+    }
+
+    // Allow working directory access
+    tracing::debug!(path = %config.working_dir().display(), "sandbox: allow write (working dir)");
+    write_write_path(&mut profile, config.working_dir());
+
+    // Python venv configuration
+    if let Some(python_config) = config.python() {
+        tracing::debug!(path = %python_config.venv().path().display(), "sandbox: allow python venv");
+        write_python_paths(&mut profile, python_config.venv().path());
+    }
+
+    // Allow network to localhost only (for proxy)
+    tracing::debug!(proxy_port = proxy_port, "sandbox: allow network to localhost proxy");
+    writeln!(profile, "(allow network* (remote ip \"localhost:{}\"))", proxy_port).unwrap();
+    writeln!(profile, "(allow network* (remote ip \"127.0.0.1:{}\"))", proxy_port).unwrap();
+    // Also allow any localhost connection for flexibility
+    writeln!(profile, "(allow network* (remote ip \"localhost:*\"))").unwrap();
+    writeln!(profile, "(allow network* (remote ip \"127.0.0.1:*\"))").unwrap();
 
     Ok(profile)
 }
