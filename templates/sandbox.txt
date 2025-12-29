@@ -40,6 +40,14 @@
 ; Explicit dyld loader access (required on modern macOS)
 (allow file-read* (literal "/usr/lib/dyld"))
 
+; Homebrew packages (read + execute) - subprocesses are also sandboxed
+; Apple Silicon
+(allow file-read* (subpath "/opt/homebrew"))
+(allow process-exec (subpath "/opt/homebrew"))
+; Intel
+(allow file-read* (subpath "/usr/local"))
+(allow process-exec (subpath "/usr/local"))
+
 ; Security rules from SecurityConfig
 {% for rule in security_deny_rules %}
 {{ rule }}
@@ -104,16 +112,9 @@
 (allow file-write-create (subpath "{{ venv_path }}"))
 (allow file-write-unlink (subpath "{{ venv_path }}"))
 (allow process-exec (subpath "{{ venv_path }}"))
-; Homebrew Python (common on macOS)
-(allow file-read* (subpath "/opt/homebrew/Cellar/python"))
-(allow file-read* (subpath "/opt/homebrew/Frameworks/Python.framework"))
-(allow file-read* (subpath "/opt/homebrew/opt/python"))
-(allow process-exec (subpath "/opt/homebrew/Cellar/python"))
-(allow process-exec (subpath "/opt/homebrew/Frameworks/Python.framework"))
 {% endif %}
 
-; Network: only allow connections to localhost (all traffic goes through proxy)
+; Network: only allow connections to the sandbox proxy port
 (deny network*)
-(allow network* (local ip "localhost:*"))
-(allow network* (remote ip "localhost:*"))
+(allow network* (remote ip "localhost:{{ proxy_port }}"))
 (allow network* (local unix-socket))

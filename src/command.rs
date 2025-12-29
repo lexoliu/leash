@@ -47,6 +47,7 @@ pub struct Command<'a> {
     backend: &'a NativeBackend,
     process_tracker: &'a ProcessTracker,
     proxy_url: String,
+    proxy_port: u16,
     program: String,
     args: Vec<String>,
     envs: Vec<(String, String)>,
@@ -70,6 +71,7 @@ impl<'a> Command<'a> {
             backend,
             process_tracker,
             proxy_url: proxy.proxy_url(),
+            proxy_port: proxy.addr().port(),
             program: program.into(),
             args: Vec::new(),
             envs: Vec::new(),
@@ -165,6 +167,7 @@ impl<'a> Command<'a> {
         self.backend
             .execute(
                 self.config,
+                self.proxy_port,
                 &self.program,
                 &self.args,
                 &envs,
@@ -183,6 +186,7 @@ impl<'a> Command<'a> {
             .backend
             .execute(
                 self.config,
+                self.proxy_port,
                 &self.program,
                 &self.args,
                 &envs,
@@ -202,6 +206,7 @@ impl<'a> Command<'a> {
             .backend
             .spawn(
                 self.config,
+                self.proxy_port,
                 &self.program,
                 &self.args,
                 &envs,

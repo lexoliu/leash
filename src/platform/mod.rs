@@ -89,6 +89,7 @@ pub(crate) trait Backend: Sized + Send + Sync {
     fn execute(
         &self,
         config: &SandboxConfigData,
+        proxy_port: u16,
         program: &str,
         args: &[String],
         envs: &[(String, String)],
@@ -102,6 +103,7 @@ pub(crate) trait Backend: Sized + Send + Sync {
     fn spawn(
         &self,
         config: &SandboxConfigData,
+        proxy_port: u16,
         program: &str,
         args: &[String],
         envs: &[(String, String)],

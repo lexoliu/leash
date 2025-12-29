@@ -57,6 +57,7 @@ impl MacOSBackend {
     fn build_command(
         &self,
         config: &SandboxConfigData,
+        proxy_port: u16,
         program: &str,
         args: &[String],
         envs: &[(String, String)],
@@ -66,7 +67,7 @@ impl MacOSBackend {
         stderr: Stdio,
     ) -> Result<Command> {
         // Generate SBPL profile
-        let sbpl_profile = profile::generate_profile(config)?;
+        let sbpl_profile = profile::generate_profile(config, proxy_port)?;
 
         tracing::debug!("Generated SBPL profile:\n{}", sbpl_profile);
 
@@ -106,6 +107,7 @@ impl Backend for MacOSBackend {
     async fn execute(
         &self,
         config: &SandboxConfigData,
+        proxy_port: u16,
         program: &str,
         args: &[String],
         envs: &[(String, String)],
@@ -116,7 +118,7 @@ impl Backend for MacOSBackend {
     ) -> Result<Output> {
         tracing::debug!(program = %program, args = ?args, "sandbox: executing command");
 
-        let mut cmd = self.build_command(config, program, args, envs, current_dir, stdin, stdout, stderr)?;
+        let mut cmd = self.build_command(config, proxy_port, program, args, envs, current_dir, stdin, stdout, stderr)?;
 
         let output = cmd.output()?;
 
@@ -133,6 +135,7 @@ impl Backend for MacOSBackend {
     async fn spawn(
         &self,
         config: &SandboxConfigData,
+        proxy_port: u16,
         program: &str,
         args: &[String],
         envs: &[(String, String)],
@@ -143,7 +146,7 @@ impl Backend for MacOSBackend {
     ) -> Result<Child> {
         tracing::debug!(program = %program, args = ?args, "sandbox: spawning command");
 
-        let mut cmd = self.build_command(config, program, args, envs, current_dir, stdin, stdout, stderr)?;
+        let mut cmd = self.build_command(config, proxy_port, program, args, envs, current_dir, stdin, stdout, stderr)?;
 
         let child = cmd.spawn()?;
 
