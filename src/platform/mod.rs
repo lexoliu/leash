@@ -1,9 +1,8 @@
 use std::future::Future;
 use std::process::{ExitStatus, Output, Stdio};
 
-use crate::config::SandboxConfig;
+use crate::config::SandboxConfigData;
 use crate::error::Result;
-use crate::network::NetworkPolicy;
 
 #[cfg(target_os = "macos")]
 pub mod macos;
@@ -87,9 +86,9 @@ impl Child {
 /// Internal trait for platform-specific sandbox backends
 pub(crate) trait Backend: Sized + Send + Sync {
     /// Execute a command and wait for completion
-    fn execute<N: NetworkPolicy>(
+    fn execute(
         &self,
-        config: &SandboxConfig<N>,
+        config: &SandboxConfigData,
         program: &str,
         args: &[String],
         envs: &[(String, String)],
@@ -100,9 +99,9 @@ pub(crate) trait Backend: Sized + Send + Sync {
     ) -> impl Future<Output = Result<Output>> + Send;
 
     /// Spawn a command as a child process
-    fn spawn<N: NetworkPolicy>(
+    fn spawn(
         &self,
-        config: &SandboxConfig<N>,
+        config: &SandboxConfigData,
         program: &str,
         args: &[String],
         envs: &[(String, String)],

@@ -3,9 +3,8 @@ mod profile;
 
 use std::process::{Command, Output, Stdio};
 
-use crate::config::SandboxConfig;
+use crate::config::SandboxConfigData;
 use crate::error::{Error, Result};
-use crate::network::NetworkPolicy;
 use crate::platform::{Backend, Child};
 
 /// macOS sandbox backend using sandbox-exec
@@ -55,9 +54,9 @@ impl MacOSBackend {
         Ok((major, minor))
     }
 
-    fn build_command<N: NetworkPolicy>(
+    fn build_command(
         &self,
-        config: &SandboxConfig<N>,
+        config: &SandboxConfigData,
         program: &str,
         args: &[String],
         envs: &[(String, String)],
@@ -89,7 +88,7 @@ impl MacOSBackend {
             }
         }
 
-        // Add custom environment variables
+        // Add custom environment variables (includes proxy vars from Command)
         for (key, val) in envs {
             cmd.env(key, val);
         }
@@ -104,9 +103,9 @@ impl MacOSBackend {
 }
 
 impl Backend for MacOSBackend {
-    async fn execute<N: NetworkPolicy>(
+    async fn execute(
         &self,
-        config: &SandboxConfig<N>,
+        config: &SandboxConfigData,
         program: &str,
         args: &[String],
         envs: &[(String, String)],
@@ -131,9 +130,9 @@ impl Backend for MacOSBackend {
         Ok(output)
     }
 
-    async fn spawn<N: NetworkPolicy>(
+    async fn spawn(
         &self,
-        config: &SandboxConfig<N>,
+        config: &SandboxConfigData,
         program: &str,
         args: &[String],
         envs: &[(String, String)],

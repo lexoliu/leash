@@ -111,16 +111,9 @@
 (allow process-exec (subpath "/opt/homebrew/Cellar/python"))
 (allow process-exec (subpath "/opt/homebrew/Frameworks/Python.framework"))
 {% endif %}
-; Network policy
-{% if network_mode == "deny" %}
+
+; Network: only allow connections to localhost (all traffic goes through proxy)
 (deny network*)
-{% else if network_mode == "allow" %}
-(allow network*)
-{% else if network_mode == "proxy" %}
-; Allow connections to localhost only (for proxy)
 (allow network* (local ip "localhost:*"))
-(allow network* (remote ip "127.0.0.1:*"))
-(allow network* (remote ip "::1:*"))
-; Allow Unix domain sockets (for local proxy implementations)
+(allow network* (remote ip "localhost:*"))
 (allow network* (local unix-socket))
-{% endif %}

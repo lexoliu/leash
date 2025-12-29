@@ -213,6 +213,56 @@ impl PythonConfigBuilder {
     }
 }
 
+/// Sandbox configuration data (without network policy)
+///
+/// This is used internally after the network policy has been extracted
+/// for the NetworkProxy.
+#[derive(Debug)]
+pub struct SandboxConfigData {
+    pub(crate) security: SecurityConfig,
+    pub(crate) writable_paths: Vec<PathBuf>,
+    pub(crate) readable_paths: Vec<PathBuf>,
+    pub(crate) executable_paths: Vec<PathBuf>,
+    pub(crate) python: Option<PythonConfig>,
+    pub(crate) working_dir: PathBuf,
+    pub(crate) env_passthrough: Vec<String>,
+    pub(crate) limits: ResourceLimits,
+}
+
+impl SandboxConfigData {
+    pub fn security(&self) -> &SecurityConfig {
+        &self.security
+    }
+
+    pub fn writable_paths(&self) -> &[PathBuf] {
+        &self.writable_paths
+    }
+
+    pub fn readable_paths(&self) -> &[PathBuf] {
+        &self.readable_paths
+    }
+
+    pub fn executable_paths(&self) -> &[PathBuf] {
+        &self.executable_paths
+    }
+
+    pub fn python(&self) -> Option<&PythonConfig> {
+        self.python.as_ref()
+    }
+
+    pub fn working_dir(&self) -> &Path {
+        &self.working_dir
+    }
+
+    pub fn env_passthrough(&self) -> &[String] {
+        &self.env_passthrough
+    }
+
+    pub fn limits(&self) -> &ResourceLimits {
+        &self.limits
+    }
+}
+
 /// Main sandbox configuration
 #[derive(Debug)]
 pub struct SandboxConfig<N: NetworkPolicy = DenyAll> {
@@ -241,6 +291,25 @@ impl<N: NetworkPolicy> SandboxConfig<N> {
     /// Create a new builder for SandboxConfig
     pub fn builder() -> SandboxConfigBuilder<DenyAll> {
         SandboxConfigBuilder::default()
+    }
+
+    /// Consume the config and return the network policy and remaining config data
+    ///
+    /// This is used internally by Sandbox to extract the policy for the NetworkProxy.
+    pub(crate) fn into_parts(self) -> (N, SandboxConfigData) {
+        (
+            self.network,
+            SandboxConfigData {
+                security: self.security,
+                writable_paths: self.writable_paths,
+                readable_paths: self.readable_paths,
+                executable_paths: self.executable_paths,
+                python: self.python,
+                working_dir: self.working_dir,
+                env_passthrough: self.env_passthrough,
+                limits: self.limits,
+            },
+        )
     }
 
     pub fn network(&self) -> &N {

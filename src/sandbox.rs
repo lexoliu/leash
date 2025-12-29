@@ -3,9 +3,9 @@ use std::process::Output;
 use std::sync::{Arc, Mutex};
 
 use crate::command::Command;
-use crate::config::SandboxConfig;
+use crate::config::{SandboxConfig, SandboxConfigData};
 use crate::error::Result;
-use crate::network::{DenyAll, NetworkPolicy};
+use crate::network::{DenyAll, NetworkPolicy, NetworkProxy};
 use crate::platform;
 
 #[cfg(target_os = "macos")]
@@ -39,6 +39,7 @@ impl ProcessTracker {
     }
 
     /// Unregister a process (when it exits normally)
+    #[allow(dead_code)]
     pub fn unregister(&self, pid: u32) {
         if let Ok(mut pids) = self.pids.lock() {
             pids.retain(|&p| p != pid);
@@ -69,12 +70,17 @@ impl ProcessTracker {
 
 /// A sandbox for running untrusted code with restricted permissions
 ///
+/// All network traffic from sandboxed processes is routed through a local proxy
+/// that applies the configured NetworkPolicy for filtering and logging.
+///
 /// When dropped, the sandbox will:
+/// - Stop the network proxy
 /// - Kill all child processes that were spawned within it
 /// - Delete the working directory (unless `keep_working_dir()` was called)
 pub struct Sandbox<N: NetworkPolicy = DenyAll> {
-    config: SandboxConfig<N>,
+    config_data: SandboxConfigData,
     backend: NativeBackend,
+    proxy: NetworkProxy<N>,
     process_tracker: ProcessTracker,
     working_dir_path: PathBuf,
     keep_working_dir: bool,
@@ -85,28 +91,40 @@ impl Sandbox<DenyAll> {
     ///
     /// Creates a random working directory in the current directory
     /// using four English words connected by hyphens.
+    ///
+    /// By default, all network access is denied (DenyAll policy).
     pub fn new() -> Result<Self> {
-        let backend = platform::create_native_backend()?;
         let config = SandboxConfig::new()?;
-        let working_dir_path = config.working_dir().to_path_buf();
-        Ok(Self {
-            config,
-            backend,
-            process_tracker: ProcessTracker::new(),
-            working_dir_path,
-            keep_working_dir: false,
-        })
+        Self::with_config(config)
     }
 }
 
-impl<N: NetworkPolicy> Sandbox<N> {
+impl<N: NetworkPolicy + 'static> Sandbox<N> {
     /// Create a sandbox with custom configuration
+    ///
+    /// The network policy from the config is used to create a local proxy
+    /// that filters all network traffic from sandboxed processes.
     pub fn with_config(config: SandboxConfig<N>) -> Result<Self> {
         let backend = platform::create_native_backend()?;
-        let working_dir_path = config.working_dir().to_path_buf();
+
+        // Extract the network policy for the proxy
+        let (policy, config_data) = config.into_parts();
+        let working_dir_path = config_data.working_dir.clone();
+
+        // Create and start the network proxy
+        let proxy = NetworkProxy::new(policy)?;
+        proxy.start()?;
+
+        tracing::info!(
+            proxy_addr = %proxy.addr(),
+            working_dir = %working_dir_path.display(),
+            "sandbox created"
+        );
+
         Ok(Self {
-            config,
+            config_data,
             backend,
+            proxy,
             process_tracker: ProcessTracker::new(),
             working_dir_path,
             keep_working_dir: false,
@@ -125,12 +143,24 @@ impl<N: NetworkPolicy> Sandbox<N> {
         self
     }
 
+    /// Get the proxy URL for environment variables
+    ///
+    /// This URL should be set as HTTP_PROXY and HTTPS_PROXY for processes
+    /// that need network access through the sandbox's proxy.
+    pub fn proxy_url(&self) -> String {
+        self.proxy.proxy_url()
+    }
+
     /// Create a command builder for running a program in the sandbox
-    pub fn command(&self, program: impl Into<String>) -> Command<'_, N> {
+    ///
+    /// The command will automatically have HTTP_PROXY and HTTPS_PROXY
+    /// environment variables set to route traffic through the sandbox's proxy.
+    pub fn command(&self, program: impl Into<String>) -> Command<'_> {
         Command::new(
-            &self.config,
+            &self.config_data,
             &self.backend,
             &self.process_tracker,
+            &self.proxy,
             program,
         )
     }
@@ -141,7 +171,7 @@ impl<N: NetworkPolicy> Sandbox<N> {
     /// virtual environment, or the system Python if no venv is configured.
     pub async fn run_python(&self, script: &str) -> Result<Output> {
         // Determine the Python interpreter to use
-        let python = if let Some(python_config) = self.config.python() {
+        let python = if let Some(python_config) = self.config_data.python() {
             // Use venv Python if configured
             let venv_path = python_config.venv().path();
             if cfg!(windows) {
@@ -163,9 +193,9 @@ impl<N: NetworkPolicy> Sandbox<N> {
             .await
     }
 
-    /// Get a reference to the sandbox configuration
-    pub fn config(&self) -> &SandboxConfig<N> {
-        &self.config
+    /// Get a reference to the sandbox configuration data
+    pub fn config(&self) -> &SandboxConfigData {
+        &self.config_data
     }
 
     /// Get the path to the working directory
@@ -176,7 +206,11 @@ impl<N: NetworkPolicy> Sandbox<N> {
 
 impl<N: NetworkPolicy> Drop for Sandbox<N> {
     fn drop(&mut self) {
-        // Always kill all child processes
+        // Stop the network proxy first
+        self.proxy.stop();
+        tracing::debug!("stopped network proxy");
+
+        // Kill all child processes
         self.process_tracker.kill_all();
         tracing::debug!("killed all sandbox child processes");
 

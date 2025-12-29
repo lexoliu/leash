@@ -1,9 +1,10 @@
 use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Output, Stdio};
 
-use crate::config::SandboxConfig;
+use crate::config::SandboxConfigData;
 use crate::error::Result;
 use crate::network::NetworkPolicy;
+use crate::network::NetworkProxy;
 use crate::platform::{Backend, Child};
 use crate::sandbox::ProcessTracker;
 
@@ -38,10 +39,14 @@ impl From<StdioConfig> for Stdio {
 }
 
 /// A builder for sandboxed commands, similar to smol::process::Command
-pub struct Command<'a, N: NetworkPolicy> {
-    sandbox_config: &'a SandboxConfig<N>,
+///
+/// All network traffic from the command is routed through the sandbox's proxy.
+/// HTTP_PROXY and HTTPS_PROXY environment variables are automatically injected.
+pub struct Command<'a> {
+    config: &'a SandboxConfigData,
     backend: &'a NativeBackend,
     process_tracker: &'a ProcessTracker,
+    proxy_url: String,
     program: String,
     args: Vec<String>,
     envs: Vec<(String, String)>,
@@ -51,18 +56,20 @@ pub struct Command<'a, N: NetworkPolicy> {
     stderr: StdioConfig,
 }
 
-impl<'a, N: NetworkPolicy> Command<'a, N> {
+impl<'a> Command<'a> {
     /// Create a new command builder (internal use)
-    pub(crate) fn new(
-        sandbox_config: &'a SandboxConfig<N>,
+    pub(crate) fn new<N: NetworkPolicy>(
+        config: &'a SandboxConfigData,
         backend: &'a NativeBackend,
         process_tracker: &'a ProcessTracker,
+        proxy: &NetworkProxy<N>,
         program: impl Into<String>,
     ) -> Self {
         Self {
-            sandbox_config,
+            config,
             backend,
             process_tracker,
+            proxy_url: proxy.proxy_url(),
             program: program.into(),
             args: Vec::new(),
             envs: Vec::new(),
@@ -129,14 +136,38 @@ impl<'a, N: NetworkPolicy> Command<'a, N> {
         self
     }
 
+    /// Build the final environment variables list, including proxy settings
+    fn build_envs(&self) -> Vec<(String, String)> {
+        let mut envs = self.envs.clone();
+
+        // Auto-inject proxy environment variables
+        // These ensure all network traffic goes through our proxy
+        let proxy_vars = [
+            ("HTTP_PROXY", &self.proxy_url),
+            ("HTTPS_PROXY", &self.proxy_url),
+            ("http_proxy", &self.proxy_url),
+            ("https_proxy", &self.proxy_url),
+        ];
+
+        for (key, val) in proxy_vars {
+            // Only add if user hasn't explicitly set it
+            if !envs.iter().any(|(k, _)| k == key) {
+                envs.push((key.to_string(), val.clone()));
+            }
+        }
+
+        envs
+    }
+
     /// Run the command and wait for completion, collecting all output
     pub async fn output(self) -> Result<Output> {
+        let envs = self.build_envs();
         self.backend
             .execute(
-                self.sandbox_config,
+                self.config,
                 &self.program,
                 &self.args,
-                &self.envs,
+                &envs,
                 self.current_dir.as_deref(),
                 Stdio::null(),
                 Stdio::piped(),
@@ -147,13 +178,14 @@ impl<'a, N: NetworkPolicy> Command<'a, N> {
 
     /// Run the command and wait for completion, returning only the exit status
     pub async fn status(self) -> Result<ExitStatus> {
+        let envs = self.build_envs();
         let output = self
             .backend
             .execute(
-                self.sandbox_config,
+                self.config,
                 &self.program,
                 &self.args,
-                &self.envs,
+                &envs,
                 self.current_dir.as_deref(),
                 self.stdin.into(),
                 self.stdout.into(),
@@ -165,13 +197,14 @@ impl<'a, N: NetworkPolicy> Command<'a, N> {
 
     /// Spawn the command as a child process for streaming I/O
     pub async fn spawn(self) -> Result<Child> {
+        let envs = self.build_envs();
         let child = self
             .backend
             .spawn(
-                self.sandbox_config,
+                self.config,
                 &self.program,
                 &self.args,
-                &self.envs,
+                &envs,
                 self.current_dir.as_deref(),
                 self.stdin.into(),
                 self.stdout.into(),

@@ -4,20 +4,8 @@ use std::path::Path;
 
 use askama::Template;
 
-use crate::config::SandboxConfig;
+use crate::config::SandboxConfigData;
 use crate::error::Result;
-use crate::network::NetworkPolicy;
-
-/// Network mode for SBPL profile
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum NetworkMode {
-    /// Deny all network access
-    Deny,
-    /// Allow all network access
-    Allow,
-    /// Allow only localhost (for proxy)
-    Proxy,
-}
 
 /// SBPL profile template
 #[derive(Template)]
@@ -28,7 +16,6 @@ struct SandboxProfile {
     executable_paths: Vec<String>,
     working_dir: String,
     python_venv_path: Option<String>,
-    network_mode: String,
     security_deny_rules: Vec<String>,
     allow_gpu: bool,
     allow_npu: bool,
@@ -36,23 +23,10 @@ struct SandboxProfile {
 }
 
 /// Generate an SBPL profile from sandbox configuration
-pub fn generate_profile<N: NetworkPolicy>(config: &SandboxConfig<N>) -> Result<String> {
-    generate_profile_with_mode(config, NetworkMode::Deny)
-}
-
-/// Generate a profile that allows network via localhost proxy
-pub fn generate_profile_with_proxy<N: NetworkPolicy>(
-    config: &SandboxConfig<N>,
-    _proxy_port: u16,
-) -> Result<String> {
-    generate_profile_with_mode(config, NetworkMode::Proxy)
-}
-
-/// Generate a profile with the specified network mode
-fn generate_profile_with_mode<N: NetworkPolicy>(
-    config: &SandboxConfig<N>,
-    network_mode: NetworkMode,
-) -> Result<String> {
+///
+/// All sandboxed processes are restricted to localhost-only network access.
+/// Network traffic must go through the sandbox's proxy for filtering and logging.
+pub fn generate_profile(config: &SandboxConfigData) -> Result<String> {
     // Log the configuration
     tracing::debug!("sandbox policy: deny all by default");
 
@@ -74,11 +48,7 @@ fn generate_profile_with_mode<N: NetworkPolicy>(
         tracing::debug!(path = %python_config.venv().path().display(), "sandbox: allow python venv");
     }
 
-    match network_mode {
-        NetworkMode::Deny => tracing::debug!("sandbox: deny network"),
-        NetworkMode::Allow => tracing::debug!("sandbox: allow network"),
-        NetworkMode::Proxy => tracing::debug!("sandbox: allow network to localhost proxy"),
-    }
+    tracing::debug!("sandbox: network restricted to localhost (proxy mode)");
 
     let security = config.security();
     if security.allow_gpu {
@@ -110,11 +80,6 @@ fn generate_profile_with_mode<N: NetworkPolicy>(
             .collect(),
         working_dir: escape_path(config.working_dir()),
         python_venv_path: config.python().map(|p| escape_path(p.venv().path())),
-        network_mode: match network_mode {
-            NetworkMode::Deny => "deny".to_string(),
-            NetworkMode::Allow => "allow".to_string(),
-            NetworkMode::Proxy => "proxy".to_string(),
-        },
         security_deny_rules: security
             .sbpl_deny_rules()
             .iter()
@@ -134,10 +99,41 @@ fn generate_profile_with_mode<N: NetworkPolicy>(
     Ok(profile)
 }
 
+/// Escape a path for use in SBPL string literals
+///
+/// SBPL uses Scheme-like syntax where strings are double-quoted.
+/// This function escapes all special characters that could break
+/// the string literal or allow injection attacks.
 fn escape_path(path: &Path) -> String {
-    path.to_string_lossy()
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
+    let path_str = path.to_string_lossy();
+    let mut escaped = String::with_capacity(path_str.len() + 16);
+
+    for c in path_str.chars() {
+        match c {
+            // Characters that MUST be escaped in SBPL strings
+            '\\' => escaped.push_str("\\\\"),
+            '"' => escaped.push_str("\\\""),
+            '\n' => escaped.push_str("\\n"),
+            '\r' => escaped.push_str("\\r"),
+            '\t' => escaped.push_str("\\t"),
+            // Null byte would truncate the string - reject entirely
+            '\0' => {
+                tracing::error!(path = %path.display(), "path contains null byte, skipping");
+                return String::new();
+            }
+            // SBPL special characters that could break parsing if unquoted
+            // These are safe inside a quoted string but we escape for safety
+            '(' | ')' | ';' => {
+                // These are safe inside quotes, but log a warning
+                tracing::warn!(path = %path.display(), char = %c, "path contains SBPL special character");
+                escaped.push(c);
+            }
+            // All other characters pass through
+            _ => escaped.push(c),
+        }
+    }
+
+    escaped
 }
 
 #[cfg(test)]
@@ -149,26 +145,50 @@ mod tests {
     #[test]
     fn test_generate_basic_profile() {
         let config = SandboxConfig::<DenyAll>::new().unwrap();
-        let profile = generate_profile(&config).unwrap();
+        let working_dir = config.working_dir().to_path_buf();
+        let (_policy, config_data) = config.into_parts();
+        let profile = generate_profile(&config_data).unwrap();
 
         assert!(profile.contains("(version 1)"));
         assert!(profile.contains("(deny default)"));
         assert!(profile.contains("(deny network*)"));
 
         // Clean up the random working directory
-        std::fs::remove_dir(config.working_dir()).ok();
+        std::fs::remove_dir(&working_dir).ok();
     }
 
     #[test]
     fn test_escape_path() {
+        // Normal paths pass through unchanged
         assert_eq!(escape_path(Path::new("/usr/bin")), "/usr/bin");
         assert_eq!(
             escape_path(Path::new("/path/with spaces")),
             "/path/with spaces"
         );
+
+        // Double quotes are escaped
         assert_eq!(
             escape_path(Path::new(r#"/path/with"quote"#)),
             r#"/path/with\"quote"#
         );
+
+        // Backslashes are escaped
+        assert_eq!(
+            escape_path(Path::new(r"/path\with\backslash")),
+            r"/path\\with\\backslash"
+        );
+
+        // Newlines and tabs are escaped
+        assert_eq!(
+            escape_path(Path::new("/path/with\nnewline")),
+            "/path/with\\nnewline"
+        );
+        assert_eq!(
+            escape_path(Path::new("/path/with\ttab")),
+            "/path/with\\ttab"
+        );
+
+        // Null bytes return empty string (rejected)
+        assert_eq!(escape_path(Path::new("/path/with\0null")), "");
     }
 }
