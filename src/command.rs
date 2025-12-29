@@ -5,6 +5,7 @@ use crate::config::SandboxConfig;
 use crate::error::Result;
 use crate::network::NetworkPolicy;
 use crate::platform::{Backend, Child};
+use crate::sandbox::ProcessTracker;
 
 #[cfg(target_os = "macos")]
 type NativeBackend = crate::platform::macos::MacOSBackend;
@@ -40,6 +41,7 @@ impl From<StdioConfig> for Stdio {
 pub struct Command<'a, N: NetworkPolicy> {
     sandbox_config: &'a SandboxConfig<N>,
     backend: &'a NativeBackend,
+    process_tracker: &'a ProcessTracker,
     program: String,
     args: Vec<String>,
     envs: Vec<(String, String)>,
@@ -54,11 +56,13 @@ impl<'a, N: NetworkPolicy> Command<'a, N> {
     pub(crate) fn new(
         sandbox_config: &'a SandboxConfig<N>,
         backend: &'a NativeBackend,
+        process_tracker: &'a ProcessTracker,
         program: impl Into<String>,
     ) -> Self {
         Self {
             sandbox_config,
             backend,
+            process_tracker,
             program: program.into(),
             args: Vec::new(),
             envs: Vec::new(),
@@ -161,7 +165,8 @@ impl<'a, N: NetworkPolicy> Command<'a, N> {
 
     /// Spawn the command as a child process for streaming I/O
     pub async fn spawn(self) -> Result<Child> {
-        self.backend
+        let child = self
+            .backend
             .spawn(
                 self.sandbox_config,
                 &self.program,
@@ -172,6 +177,11 @@ impl<'a, N: NetworkPolicy> Command<'a, N> {
                 self.stdout.into(),
                 self.stderr.into(),
             )
-            .await
+            .await?;
+
+        // Register the child process for tracking
+        self.process_tracker.register(child.id());
+
+        Ok(child)
     }
 }

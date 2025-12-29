@@ -33,6 +33,10 @@ rand = "0.8"
 # Directory operations
 remove_dir_all = "0.8"
 
+# Unix process management
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # Python executable detection (optional)
 [dependencies.which]
 version = "7"
