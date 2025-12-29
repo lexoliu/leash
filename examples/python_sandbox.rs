@@ -1,15 +1,13 @@
 //! Test Python execution in sandbox with venv
 
-use native_sandbox::{PythonConfig, Sandbox, SandboxConfigBuilder, VenvConfig, VenvManager};
+use leash::{PythonConfig, Sandbox, SandboxConfigBuilder, VenvConfig, VenvManager};
 
 #[tokio::main]
-async fn main() -> native_sandbox::Result<()> {
+async fn main() -> leash::Result<()> {
     tracing_subscriber::fmt::init();
 
     // Create a venv config
-    let venv_config = VenvConfig::builder()
-        .path("/tmp/sandbox-test-venv")
-        .build();
+    let venv_config = VenvConfig::builder().path("/tmp/sandbox-test-venv").build();
 
     // Create the venv first
     println!("Creating virtual environment...");

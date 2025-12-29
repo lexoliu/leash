@@ -465,6 +465,33 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
+name = "leash"
+version = "0.1.0"
+dependencies = [
+ "askama",
+ "async-io",
+ "async-net",
+ "bytes",
+ "executor-core",
+ "futures-lite",
+ "http-body-util",
+ "hyper",
+ "landlock",
+ "libc",
+ "nix",
+ "rand",
+ "remove_dir_all",
+ "seccompiler",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "which",
+ "windows",
+]
+
+[[package]]
 name = "libc"
 version = "0.2.178"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -515,33 +542,6 @@ name = "minimal-lexical"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
-
-[[package]]
-name = "native-sandbox"
-version = "0.1.0"
-dependencies = [
- "askama",
- "async-io",
- "async-net",
- "bytes",
- "executor-core",
- "futures-lite",
- "http-body-util",
- "hyper",
- "landlock",
- "libc",
- "nix",
- "rand",
- "remove_dir_all",
- "seccompiler",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "which",
- "windows",
-]
 
 [[package]]
 name = "nix"

@@ -11,7 +11,7 @@
 //! # Custom Configuration
 //!
 //! ```rust,ignore
-//! use native_sandbox::SecurityConfig;
+//! use leash::SecurityConfig;
 //!
 //! let config = SecurityConfig::builder()
 //!     .protect_credentials(true)

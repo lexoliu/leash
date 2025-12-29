@@ -1,9 +1,9 @@
 //! Basic sandbox example
 
-use native_sandbox::Sandbox;
+use leash::Sandbox;
 
 #[tokio::main]
-async fn main() -> native_sandbox::Result<()> {
+async fn main() -> leash::Result<()> {
     // Enable tracing for debug output
     tracing_subscriber::fmt::init();
 

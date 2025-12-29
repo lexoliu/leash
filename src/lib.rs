@@ -9,9 +9,9 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use native_sandbox::Sandbox;
+//! use leash::Sandbox;
 //!
-//! async fn run_sandboxed() -> native_sandbox::Result<()> {
+//! async fn run_sandboxed() -> leash::Result<()> {
 //!     // Create a sandbox with default configuration (network denied)
 //!     let sandbox = Sandbox::new()?;
 //!
@@ -41,9 +41,9 @@
 //! The library has built-in support for Python virtual environments:
 //!
 //! ```rust,ignore
-//! use native_sandbox::{Sandbox, SandboxConfig, PythonConfig, VenvConfig};
+//! use leash::{Sandbox, SandboxConfig, PythonConfig, VenvConfig};
 //!
-//! async fn run_python() -> native_sandbox::Result<()> {
+//! async fn run_python() -> leash::Result<()> {
 //!     let venv_config = VenvConfig::builder()
 //!         .packages(["requests", "numpy"])
 //!         .build();
@@ -71,9 +71,9 @@ mod workdir;
 // Re-export public types
 pub use command::{Command, StdioConfig};
 pub use config::{
-    python_data_science_preset, python_dev_preset, strict_preset, PythonConfig,
-    PythonConfigBuilder, ResourceLimits, ResourceLimitsBuilder, SandboxConfig,
-    SandboxConfigBuilder, VenvConfig, VenvConfigBuilder,
+    PythonConfig, PythonConfigBuilder, ResourceLimits, ResourceLimitsBuilder, SandboxConfig,
+    SandboxConfigBuilder, VenvConfig, VenvConfigBuilder, python_data_science_preset,
+    python_dev_preset, strict_preset,
 };
 pub use error::{Error, Result};
 pub use network::{

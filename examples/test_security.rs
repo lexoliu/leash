@@ -1,10 +1,10 @@
 //! Test security protections in sandbox with Python
 
-use native_sandbox::{Sandbox, SandboxConfigBuilder, SecurityConfig};
+use leash::{Sandbox, SandboxConfigBuilder, SecurityConfig};
 use std::path::Path;
 
 #[tokio::main]
-async fn main() -> native_sandbox::Result<()> {
+async fn main() -> leash::Result<()> {
     tracing_subscriber::fmt::init();
 
     let scripts_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/scripts");
