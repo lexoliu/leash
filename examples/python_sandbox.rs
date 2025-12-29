@@ -3,7 +3,7 @@
 use native_sandbox::{PythonConfig, Sandbox, SandboxConfigBuilder, VenvConfig, VenvManager};
 
 #[tokio::main]
-async fn main() -> native_sandbox::SandboxResult<()> {
+async fn main() -> native_sandbox::Result<()> {
     tracing_subscriber::fmt::init();
 
     // Create a venv config

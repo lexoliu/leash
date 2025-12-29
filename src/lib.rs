@@ -11,7 +11,7 @@
 //! ```rust,ignore
 //! use native_sandbox::Sandbox;
 //!
-//! async fn run_sandboxed() -> native_sandbox::SandboxResult<()> {
+//! async fn run_sandboxed() -> native_sandbox::Result<()> {
 //!     // Create a sandbox with default configuration (network denied)
 //!     let sandbox = Sandbox::new()?;
 //!
@@ -43,7 +43,7 @@
 //! ```rust,ignore
 //! use native_sandbox::{Sandbox, SandboxConfig, PythonConfig, VenvConfig};
 //!
-//! async fn run_python() -> native_sandbox::SandboxResult<()> {
+//! async fn run_python() -> native_sandbox::Result<()> {
 //!     let venv_config = VenvConfig::builder()
 //!         .packages(["requests", "numpy"])
 //!         .build();
@@ -66,6 +66,7 @@ mod platform;
 mod python;
 mod sandbox;
 mod security;
+mod workdir;
 
 // Re-export public types
 pub use command::{Command, StdioConfig};
@@ -74,7 +75,7 @@ pub use config::{
     PythonConfigBuilder, ResourceLimits, ResourceLimitsBuilder, SandboxConfig,
     SandboxConfigBuilder, VenvConfig, VenvConfigBuilder,
 };
-pub use error::{SandboxError, SandboxResult};
+pub use error::{Error, Result};
 pub use network::{
     AllowAll, AllowList, ConnectionDirection, CustomPolicy, DenyAll, DomainRequest, NetworkPolicy,
     NetworkProxy,
@@ -83,3 +84,4 @@ pub use platform::Child;
 pub use python::VenvManager;
 pub use sandbox::Sandbox;
 pub use security::{SecurityConfig, SecurityConfigBuilder};
+pub use workdir::WorkingDir;

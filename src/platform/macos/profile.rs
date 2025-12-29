@@ -5,7 +5,7 @@ use std::path::Path;
 use askama::Template;
 
 use crate::config::SandboxConfig;
-use crate::error::SandboxResult;
+use crate::error::Result;
 use crate::network::NetworkPolicy;
 
 /// Network mode for SBPL profile
@@ -33,7 +33,7 @@ struct SandboxProfile {
 }
 
 /// Generate an SBPL profile from sandbox configuration
-pub fn generate_profile<N: NetworkPolicy>(config: &SandboxConfig<N>) -> SandboxResult<String> {
+pub fn generate_profile<N: NetworkPolicy>(config: &SandboxConfig<N>) -> Result<String> {
     generate_profile_with_mode(config, NetworkMode::Deny)
 }
 
@@ -41,7 +41,7 @@ pub fn generate_profile<N: NetworkPolicy>(config: &SandboxConfig<N>) -> SandboxR
 pub fn generate_profile_with_proxy<N: NetworkPolicy>(
     config: &SandboxConfig<N>,
     _proxy_port: u16,
-) -> SandboxResult<String> {
+) -> Result<String> {
     generate_profile_with_mode(config, NetworkMode::Proxy)
 }
 
@@ -49,7 +49,7 @@ pub fn generate_profile_with_proxy<N: NetworkPolicy>(
 fn generate_profile_with_mode<N: NetworkPolicy>(
     config: &SandboxConfig<N>,
     network_mode: NetworkMode,
-) -> SandboxResult<String> {
+) -> Result<String> {
     // Log the configuration
     tracing::debug!("sandbox policy: deny all by default");
 
@@ -110,7 +110,7 @@ fn generate_profile_with_mode<N: NetworkPolicy>(
     };
 
     let profile = template.render().map_err(|e| {
-        crate::error::SandboxError::InvalidProfile(format!("Template render error: {}", e))
+        crate::error::Error::InvalidProfile(format!("Template render error: {}", e))
     })?;
 
     tracing::debug!("Generated SBPL profile:\n{}", profile);
@@ -132,12 +132,15 @@ mod tests {
 
     #[test]
     fn test_generate_basic_profile() {
-        let config = SandboxConfig::<DenyAll>::default();
+        let config = SandboxConfig::<DenyAll>::new().unwrap();
         let profile = generate_profile(&config).unwrap();
 
         assert!(profile.contains("(version 1)"));
         assert!(profile.contains("(deny default)"));
         assert!(profile.contains("(deny network*)"));
+
+        // Clean up the random working directory
+        std::fs::remove_dir(config.working_dir()).ok();
     }
 
     #[test]

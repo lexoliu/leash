@@ -27,6 +27,12 @@ futures-lite = "2"
 # Compile-time templates
 askama = "0.12"
 
+# Random number generation
+rand = "0.8"
+
+# Directory operations
+remove_dir_all = "0.8"
+
 # Python executable detection (optional)
 [dependencies.which]
 version = "7"

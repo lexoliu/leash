@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::{ExitStatus, Output, Stdio};
 
 use crate::config::SandboxConfig;
-use crate::error::SandboxResult;
+use crate::error::Result;
 use crate::network::NetworkPolicy;
 use crate::platform::{Backend, Child};
 
@@ -126,7 +126,7 @@ impl<'a, N: NetworkPolicy> Command<'a, N> {
     }
 
     /// Run the command and wait for completion, collecting all output
-    pub async fn output(self) -> SandboxResult<Output> {
+    pub async fn output(self) -> Result<Output> {
         self.backend
             .execute(
                 self.sandbox_config,
@@ -142,7 +142,7 @@ impl<'a, N: NetworkPolicy> Command<'a, N> {
     }
 
     /// Run the command and wait for completion, returning only the exit status
-    pub async fn status(self) -> SandboxResult<ExitStatus> {
+    pub async fn status(self) -> Result<ExitStatus> {
         let output = self
             .backend
             .execute(
@@ -160,7 +160,7 @@ impl<'a, N: NetworkPolicy> Command<'a, N> {
     }
 
     /// Spawn the command as a child process for streaming I/O
-    pub async fn spawn(self) -> SandboxResult<Child> {
+    pub async fn spawn(self) -> Result<Child> {
         self.backend
             .spawn(
                 self.sandbox_config,

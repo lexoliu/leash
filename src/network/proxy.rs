@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 
-use crate::error::{SandboxError, SandboxResult};
+use crate::error::{Error, Result};
 use crate::network::{ConnectionDirection, DomainRequest, NetworkPolicy};
 
 /// A network proxy that filters requests based on a NetworkPolicy
@@ -22,7 +22,7 @@ pub struct NetworkProxy<N: NetworkPolicy> {
 
 impl<N: NetworkPolicy + 'static> NetworkProxy<N> {
     /// Create a new network proxy with the given policy
-    pub fn new(policy: N) -> SandboxResult<Self> {
+    pub fn new(policy: N) -> Result<Self> {
         // Bind to a random available port on localhost
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let addr = listener.local_addr()?;
@@ -48,7 +48,7 @@ impl<N: NetworkPolicy + 'static> NetworkProxy<N> {
     }
 
     /// Start the proxy server in a background thread
-    pub fn start(&self) -> SandboxResult<()> {
+    pub fn start(&self) -> Result<()> {
         if self.running.swap(true, Ordering::SeqCst) {
             return Ok(()); // Already running
         }
@@ -111,7 +111,7 @@ fn handle_connection<N: NetworkPolicy>(
     mut client: TcpStream,
     peer_addr: SocketAddr,
     policy: &N,
-) -> SandboxResult<()> {
+) -> Result<()> {
     client.set_nonblocking(false)?;
 
     let mut reader = BufReader::new(client.try_clone()?);
@@ -120,7 +120,7 @@ fn handle_connection<N: NetworkPolicy>(
 
     let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
     if parts.len() < 2 {
-        return Err(SandboxError::ProxyError("Invalid request line".to_string()));
+        return Err(Error::ProxyError("Invalid request line".to_string()));
     }
 
     let method = parts[0];
@@ -143,7 +143,7 @@ fn handle_connect<N: NetworkPolicy>(
     mut reader: BufReader<TcpStream>,
     target: &str,
     policy: &N,
-) -> SandboxResult<()> {
+) -> Result<()> {
     // Parse host:port from target
     let (host, port) = parse_host_port(target, 443)?;
 
@@ -197,7 +197,7 @@ fn handle_http<N: NetworkPolicy>(
     request_line: &str,
     target: &str,
     policy: &N,
-) -> SandboxResult<()> {
+) -> Result<()> {
     // Parse URL to get host
     let (host, port, path) = parse_http_url(target)?;
 
@@ -259,12 +259,12 @@ fn handle_http<N: NetworkPolicy>(
 }
 
 /// Parse host:port from CONNECT target
-fn parse_host_port(target: &str, default_port: u16) -> SandboxResult<(String, u16)> {
+fn parse_host_port(target: &str, default_port: u16) -> Result<(String, u16)> {
     if let Some(colon_pos) = target.rfind(':') {
         let host = target[..colon_pos].to_string();
         let port: u16 = target[colon_pos + 1..]
             .parse()
-            .map_err(|_| SandboxError::ProxyError(format!("Invalid port in: {}", target)))?;
+            .map_err(|_| Error::ProxyError(format!("Invalid port in: {}", target)))?;
         Ok((host, port))
     } else {
         Ok((target.to_string(), default_port))
@@ -272,7 +272,7 @@ fn parse_host_port(target: &str, default_port: u16) -> SandboxResult<(String, u1
 }
 
 /// Parse HTTP URL to extract host, port, and path
-fn parse_http_url(url: &str) -> SandboxResult<(String, u16, String)> {
+fn parse_http_url(url: &str) -> Result<(String, u16, String)> {
     // Handle absolute URLs (http://host:port/path)
     let url = if let Some(stripped) = url.strip_prefix("http://") {
         stripped
@@ -296,7 +296,7 @@ fn parse_http_url(url: &str) -> SandboxResult<(String, u16, String)> {
 }
 
 /// Tunnel data bidirectionally between two streams
-fn tunnel(client: &mut TcpStream, target: &mut TcpStream) -> SandboxResult<()> {
+fn tunnel(client: &mut TcpStream, target: &mut TcpStream) -> Result<()> {
     // Clone streams for bidirectional transfer
     let mut client_read = client.try_clone()?;
     let mut client_write = client.try_clone()?;

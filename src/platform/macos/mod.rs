@@ -4,7 +4,7 @@ mod profile;
 use std::process::{Command, Output, Stdio};
 
 use crate::config::SandboxConfig;
-use crate::error::{SandboxError, SandboxResult};
+use crate::error::{Error, Result};
 use crate::network::NetworkPolicy;
 use crate::platform::{Backend, Child};
 
@@ -15,11 +15,11 @@ pub struct MacOSBackend {
 
 impl MacOSBackend {
     /// Create a new macOS sandbox backend
-    pub fn new() -> SandboxResult<Self> {
+    pub fn new() -> Result<Self> {
         // Verify macOS version >= 10.15
         let version = Self::get_macos_version()?;
         if version < (10, 15) {
-            return Err(SandboxError::UnsupportedPlatformVersion {
+            return Err(Error::UnsupportedPlatformVersion {
                 platform: "macOS",
                 minimum: "10.15",
                 current: format!("{}.{}", version.0, version.1),
@@ -29,27 +29,27 @@ impl MacOSBackend {
         Ok(Self { _private: () })
     }
 
-    fn get_macos_version() -> SandboxResult<(u32, u32)> {
+    fn get_macos_version() -> Result<(u32, u32)> {
         let output = Command::new("sw_vers")
             .arg("-productVersion")
             .output()
-            .map_err(|e| SandboxError::SandboxInitFailed(format!("Failed to get macOS version: {}", e)))?;
+            .map_err(|e| Error::InitFailed(format!("Failed to get macOS version: {}", e)))?;
 
         let version_str = String::from_utf8_lossy(&output.stdout);
         let parts: Vec<&str> = version_str.trim().split('.').collect();
 
         if parts.len() < 2 {
-            return Err(SandboxError::SandboxInitFailed(format!(
+            return Err(Error::InitFailed(format!(
                 "Invalid macOS version format: {}",
                 version_str
             )));
         }
 
         let major: u32 = parts[0].parse().map_err(|_| {
-            SandboxError::SandboxInitFailed(format!("Invalid major version: {}", parts[0]))
+            Error::InitFailed(format!("Invalid major version: {}", parts[0]))
         })?;
         let minor: u32 = parts[1].parse().map_err(|_| {
-            SandboxError::SandboxInitFailed(format!("Invalid minor version: {}", parts[1]))
+            Error::InitFailed(format!("Invalid minor version: {}", parts[1]))
         })?;
 
         Ok((major, minor))
@@ -65,7 +65,7 @@ impl MacOSBackend {
         stdin: Stdio,
         stdout: Stdio,
         stderr: Stdio,
-    ) -> SandboxResult<Command> {
+    ) -> Result<Command> {
         // Generate SBPL profile
         let sbpl_profile = profile::generate_profile(config)?;
 
@@ -114,7 +114,7 @@ impl Backend for MacOSBackend {
         stdin: Stdio,
         stdout: Stdio,
         stderr: Stdio,
-    ) -> SandboxResult<Output> {
+    ) -> Result<Output> {
         tracing::debug!(program = %program, args = ?args, "sandbox: executing command");
 
         let mut cmd = self.build_command(config, program, args, envs, current_dir, stdin, stdout, stderr)?;
@@ -141,7 +141,7 @@ impl Backend for MacOSBackend {
         stdin: Stdio,
         stdout: Stdio,
         stderr: Stdio,
-    ) -> SandboxResult<Child> {
+    ) -> Result<Child> {
         tracing::debug!(program = %program, args = ?args, "sandbox: spawning command");
 
         let mut cmd = self.build_command(config, program, args, envs, current_dir, stdin, stdout, stderr)?;

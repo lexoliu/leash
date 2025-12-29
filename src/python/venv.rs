@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::config::VenvConfig;
-use crate::error::{SandboxError, SandboxResult};
+use crate::error::{Error, Result};
 
 /// Manages a Python virtual environment
 pub struct VenvManager {
@@ -15,7 +15,7 @@ pub struct VenvManager {
 
 impl VenvManager {
     /// Create a new virtual environment from configuration
-    pub async fn create(config: &VenvConfig) -> SandboxResult<Self> {
+    pub async fn create(config: &VenvConfig) -> Result<Self> {
         let path = config.path().to_path_buf();
 
         tracing::debug!(path = %path.display(), "venv: creating virtual environment");
@@ -35,14 +35,14 @@ impl VenvManager {
     }
 
     /// Load an existing virtual environment
-    pub fn from_existing(path: &Path) -> SandboxResult<Self> {
+    pub fn from_existing(path: &Path) -> Result<Self> {
         if !path.exists() {
-            return Err(SandboxError::VenvNotFound(path.to_path_buf()));
+            return Err(Error::VenvNotFound(path.to_path_buf()));
         }
 
         let python_path = Self::python_executable(path);
         if !python_path.exists() {
-            return Err(SandboxError::VenvNotFound(path.to_path_buf()));
+            return Err(Error::VenvNotFound(path.to_path_buf()));
         }
 
         let site_packages_path = Self::find_site_packages(path)?;
@@ -66,7 +66,7 @@ impl VenvManager {
     }
 
     /// Create venv using uv (faster)
-    async fn create_with_uv(config: &VenvConfig) -> SandboxResult<Self> {
+    async fn create_with_uv(config: &VenvConfig) -> Result<Self> {
         let path = config.path();
 
         tracing::debug!(path = %path.display(), "venv: creating with uv");
@@ -86,7 +86,7 @@ impl VenvManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(SandboxError::VenvCreationFailed(stderr.to_string()));
+            return Err(Error::VenvCreationFailed(stderr.to_string()));
         }
 
         tracing::debug!(path = %path.display(), "venv: created successfully with uv");
@@ -99,7 +99,7 @@ impl VenvManager {
     }
 
     /// Create venv using Python's venv module
-    async fn create_with_python(config: &VenvConfig) -> SandboxResult<Self> {
+    async fn create_with_python(config: &VenvConfig) -> Result<Self> {
         let path = config.path();
 
         // Find Python interpreter
@@ -108,7 +108,7 @@ impl VenvManager {
             .map(|p| p.to_path_buf())
             .or_else(|| which::which("python3").ok())
             .or_else(|| which::which("python").ok())
-            .ok_or(SandboxError::PythonNotFound)?;
+            .ok_or(Error::PythonNotFound)?;
 
         tracing::debug!(
             path = %path.display(),
@@ -127,7 +127,7 @@ impl VenvManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(SandboxError::VenvCreationFailed(stderr.to_string()));
+            return Err(Error::VenvCreationFailed(stderr.to_string()));
         }
 
         tracing::debug!(path = %path.display(), "venv: created successfully with python");
@@ -140,7 +140,7 @@ impl VenvManager {
     }
 
     /// Install packages using uv
-    async fn install_packages_uv(&self, packages: &[String]) -> SandboxResult<()> {
+    async fn install_packages_uv(&self, packages: &[String]) -> Result<()> {
         if packages.is_empty() {
             return Ok(());
         }
@@ -158,7 +158,7 @@ impl VenvManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(SandboxError::PackageInstallFailed(stderr.to_string()));
+            return Err(Error::PackageInstallFailed(stderr.to_string()));
         }
 
         tracing::debug!(packages = ?packages, "venv: packages installed successfully");
@@ -167,7 +167,7 @@ impl VenvManager {
     }
 
     /// Install packages using pip
-    async fn install_packages_pip(&self, packages: &[String]) -> SandboxResult<()> {
+    async fn install_packages_pip(&self, packages: &[String]) -> Result<()> {
         if packages.is_empty() {
             return Ok(());
         }
@@ -181,7 +181,7 @@ impl VenvManager {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(SandboxError::PackageInstallFailed(stderr.to_string()));
+            return Err(Error::PackageInstallFailed(stderr.to_string()));
         }
 
         tracing::debug!(packages = ?packages, "venv: packages installed successfully");
@@ -199,14 +199,14 @@ impl VenvManager {
     }
 
     /// Find the site-packages directory
-    fn find_site_packages(venv_path: &Path) -> SandboxResult<PathBuf> {
+    fn find_site_packages(venv_path: &Path) -> Result<PathBuf> {
         let lib_path = if cfg!(windows) {
             venv_path.join("Lib").join("site-packages")
         } else {
             // On Unix, it's lib/pythonX.Y/site-packages
             let lib_dir = venv_path.join("lib");
             if !lib_dir.exists() {
-                return Err(SandboxError::VenvNotFound(venv_path.to_path_buf()));
+                return Err(Error::VenvNotFound(venv_path.to_path_buf()));
             }
 
             // Find the python version directory
@@ -225,7 +225,7 @@ impl VenvManager {
                 }
             }
 
-            site_packages.ok_or_else(|| SandboxError::VenvNotFound(venv_path.to_path_buf()))?
+            site_packages.ok_or_else(|| Error::VenvNotFound(venv_path.to_path_buf()))?
         };
 
         Ok(lib_path)

@@ -41,13 +41,15 @@ pub struct SecurityConfig {
 
 impl Default for SecurityConfig {
     fn default() -> Self {
-        Self::privacy_first()
+        Self::strict()
     }
 }
 
 impl SecurityConfig {
-    /// Privacy-first preset - maximum protection (default)
-    pub fn privacy_first() -> Self {
+    /// Strict preset - maximum protection (default)
+    ///
+    /// All sensitive data protection is enabled.
+    pub fn strict() -> Self {
         Self {
             protect_user_home: true,
             protect_credentials: true,
@@ -137,7 +139,7 @@ pub struct SecurityConfigBuilder {
 impl Default for SecurityConfigBuilder {
     fn default() -> Self {
         Self {
-            config: SecurityConfig::privacy_first(),
+            config: SecurityConfig::strict(),
         }
     }
 }
@@ -203,8 +205,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_privacy_first_has_all_rules() {
-        let config = SecurityConfig::privacy_first();
+    fn test_strict_has_all_rules() {
+        let config = SecurityConfig::strict();
         let rules = config.sbpl_deny_rules();
 
         assert!(rules.iter().any(|r| r.contains("/Users")));

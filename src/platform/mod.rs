@@ -2,7 +2,7 @@ use std::future::Future;
 use std::process::{ExitStatus, Output, Stdio};
 
 use crate::config::SandboxConfig;
-use crate::error::SandboxResult;
+use crate::error::Result;
 use crate::network::NetworkPolicy;
 
 #[cfg(target_os = "macos")]
@@ -60,26 +60,26 @@ impl Child {
     }
 
     /// Wait for the child to exit
-    pub async fn wait(&mut self) -> SandboxResult<ExitStatus> {
+    pub async fn wait(&mut self) -> Result<ExitStatus> {
         // For now, use blocking wait wrapped in a poll
         // In a real implementation, this would use async I/O
         Ok(self.inner.wait()?)
     }
 
     /// Wait for the child to exit and collect all output
-    pub async fn wait_with_output(self) -> SandboxResult<Output> {
+    pub async fn wait_with_output(self) -> Result<Output> {
         // For now, use blocking wait_with_output
         // In a real implementation, this would use async I/O
         Ok(self.inner.wait_with_output()?)
     }
 
     /// Attempt to kill the child process
-    pub fn kill(&mut self) -> SandboxResult<()> {
+    pub fn kill(&mut self) -> Result<()> {
         Ok(self.inner.kill()?)
     }
 
     /// Check if the child has exited without blocking
-    pub fn try_wait(&mut self) -> SandboxResult<Option<ExitStatus>> {
+    pub fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
         Ok(self.inner.try_wait()?)
     }
 }
@@ -97,7 +97,7 @@ pub(crate) trait Backend: Sized + Send + Sync {
         stdin: Stdio,
         stdout: Stdio,
         stderr: Stdio,
-    ) -> impl Future<Output = SandboxResult<Output>> + Send;
+    ) -> impl Future<Output = Result<Output>> + Send;
 
     /// Spawn a command as a child process
     fn spawn<N: NetworkPolicy>(
@@ -110,26 +110,26 @@ pub(crate) trait Backend: Sized + Send + Sync {
         stdin: Stdio,
         stdout: Stdio,
         stderr: Stdio,
-    ) -> impl Future<Output = SandboxResult<Child>> + Send;
+    ) -> impl Future<Output = Result<Child>> + Send;
 }
 
 /// Create the native backend for the current platform
 #[cfg(target_os = "macos")]
-pub(crate) fn create_native_backend() -> SandboxResult<macos::MacOSBackend> {
+pub(crate) fn create_native_backend() -> Result<macos::MacOSBackend> {
     macos::MacOSBackend::new()
 }
 
 #[cfg(target_os = "linux")]
-pub(crate) fn create_native_backend() -> SandboxResult<linux::LinuxBackend> {
+pub(crate) fn create_native_backend() -> Result<linux::LinuxBackend> {
     linux::LinuxBackend::new()
 }
 
 #[cfg(target_os = "windows")]
-pub(crate) fn create_native_backend() -> SandboxResult<windows::WindowsBackend> {
+pub(crate) fn create_native_backend() -> Result<windows::WindowsBackend> {
     windows::WindowsBackend::new()
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
-pub(crate) fn create_native_backend() -> SandboxResult<()> {
-    Err(crate::error::SandboxError::UnsupportedPlatform)
+pub(crate) fn create_native_backend() -> Result<()> {
+    Err(crate::error::Error::UnsupportedPlatform)
 }

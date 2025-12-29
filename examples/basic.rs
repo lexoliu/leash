@@ -3,7 +3,7 @@
 use native_sandbox::Sandbox;
 
 #[tokio::main]
-async fn main() -> native_sandbox::SandboxResult<()> {
+async fn main() -> native_sandbox::Result<()> {
     // Enable tracing for debug output
     tracing_subscriber::fmt::init();
 

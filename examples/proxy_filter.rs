@@ -1,9 +1,9 @@
 //! Test network proxy filtering with AllowList policy
 
-use native_sandbox::{AllowList, NetworkProxy, SandboxResult};
+use native_sandbox::{AllowList, NetworkProxy, Result};
 
 #[tokio::main]
-async fn main() -> SandboxResult<()> {
+async fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
 
     // Create an AllowList policy that only allows httpbin.org

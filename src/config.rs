@@ -1,8 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use crate::error::{SandboxError, SandboxResult};
+use crate::error::{Error, Result};
 use crate::network::{DenyAll, NetworkPolicy};
 use crate::security::SecurityConfig;
+use crate::workdir::WorkingDir;
 
 /// Resource limits for sandboxed processes
 #[derive(Debug, Clone, Default)]
@@ -226,19 +227,13 @@ pub struct SandboxConfig<N: NetworkPolicy = DenyAll> {
     limits: ResourceLimits,
 }
 
-impl Default for SandboxConfig<DenyAll> {
-    fn default() -> Self {
-        Self {
-            network: DenyAll,
-            security: SecurityConfig::default(),
-            writable_paths: Vec::new(),
-            readable_paths: Vec::new(),
-            executable_paths: Vec::new(),
-            python: None,
-            working_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            env_passthrough: Vec::new(),
-            limits: ResourceLimits::default(),
-        }
+impl SandboxConfig<DenyAll> {
+    /// Create a new SandboxConfig with default settings
+    ///
+    /// This creates a random working directory in the current directory
+    /// using four English words connected by hyphens.
+    pub fn new() -> Result<Self> {
+        SandboxConfigBuilder::default().build()
     }
 }
 
@@ -294,7 +289,7 @@ pub struct SandboxConfigBuilder<N: NetworkPolicy = DenyAll> {
     readable_paths: Vec<PathBuf>,
     executable_paths: Vec<PathBuf>,
     python: Option<PythonConfig>,
-    working_dir: PathBuf,
+    working_dir: Option<PathBuf>,
     env_passthrough: Vec<String>,
     limits: ResourceLimits,
 }
@@ -308,7 +303,7 @@ impl Default for SandboxConfigBuilder<DenyAll> {
             readable_paths: Vec::new(),
             executable_paths: Vec::new(),
             python: None,
-            working_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            working_dir: None, // Will generate random name on build()
             env_passthrough: Vec::new(),
             limits: ResourceLimits::default(),
         }
@@ -375,8 +370,12 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
         self
     }
 
+    /// Set the working directory path
+    ///
+    /// If not set, a random directory name will be generated in the current directory.
+    /// The directory will be created if it doesn't exist.
     pub fn working_dir(mut self, path: impl AsRef<Path>) -> Self {
-        self.working_dir = path.as_ref().to_path_buf();
+        self.working_dir = Some(path.as_ref().to_path_buf());
         self
     }
 
@@ -396,11 +395,30 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
         self
     }
 
-    pub fn build(self) -> SandboxResult<SandboxConfig<N>> {
-        // Validate working directory exists
-        if !self.working_dir.exists() {
-            return Err(SandboxError::PathNotFound(self.working_dir));
-        }
+    pub fn build(self) -> Result<SandboxConfig<N>> {
+        // Resolve working directory: use specified path or create random one
+        let working_dir = match self.working_dir {
+            Some(path) => {
+                // User specified a path - create if needed
+                if !path.exists() {
+                    std::fs::create_dir_all(&path).map_err(|e| {
+                        Error::IoError(format!(
+                            "Failed to create working directory '{}': {}",
+                            path.display(),
+                            e
+                        ))
+                    })?;
+                    tracing::debug!(path = %path.display(), "created working directory");
+                }
+                path
+            }
+            None => {
+                // Generate random working directory
+                let work_dir = WorkingDir::random()?;
+                tracing::info!(path = %work_dir.path().display(), "created random working directory");
+                work_dir.path().to_path_buf()
+            }
+        };
 
         Ok(SandboxConfig {
             network: self.network,
@@ -409,7 +427,7 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
             readable_paths: self.readable_paths,
             executable_paths: self.executable_paths,
             python: self.python,
-            working_dir: self.working_dir,
+            working_dir,
             env_passthrough: self.env_passthrough,
             limits: self.limits,
         })
@@ -417,20 +435,19 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
 }
 
 /// Create a strict sandbox config with no network and minimal access
-pub fn strict_preset() -> SandboxConfig<DenyAll> {
-    SandboxConfig::default()
+pub fn strict_preset() -> Result<SandboxConfig<DenyAll>> {
+    SandboxConfigBuilder::default().build()
 }
 
 /// Create a sandbox config for Python development with pip install capability
-pub fn python_dev_preset() -> SandboxConfig<DenyAll> {
+pub fn python_dev_preset() -> Result<SandboxConfig<DenyAll>> {
     SandboxConfigBuilder::default()
         .python(PythonConfig::builder().allow_pip_install(true).build())
         .build()
-        .expect("python_dev_preset should always be valid")
 }
 
 /// Create a sandbox config for Python data science with common tools
-pub fn python_data_science_preset() -> SandboxConfig<DenyAll> {
+pub fn python_data_science_preset() -> Result<SandboxConfig<DenyAll>> {
     SandboxConfigBuilder::default()
         .python(
             PythonConfig::builder()
@@ -447,5 +464,4 @@ pub fn python_data_science_preset() -> SandboxConfig<DenyAll> {
         .executable_path("/usr/local/bin/ffmpeg")
         .readable_path("/usr/share")
         .build()
-        .expect("python_data_science_preset should always be valid")
 }

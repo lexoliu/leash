@@ -2,7 +2,7 @@ use std::process::Output;
 
 use crate::command::Command;
 use crate::config::SandboxConfig;
-use crate::error::SandboxResult;
+use crate::error::Result;
 use crate::network::{DenyAll, NetworkPolicy};
 use crate::platform;
 
@@ -22,17 +22,20 @@ pub struct Sandbox<N: NetworkPolicy = DenyAll> {
 }
 
 impl Sandbox<DenyAll> {
-    /// Create a new sandbox with default configuration (network denied)
-    pub fn new() -> SandboxResult<Self> {
+    /// Create a new sandbox with default configuration
+    ///
+    /// Creates a random working directory in the current directory
+    /// using four English words connected by hyphens.
+    pub fn new() -> Result<Self> {
         let backend = platform::create_native_backend()?;
-        let config = SandboxConfig::default();
+        let config = SandboxConfig::new()?;
         Ok(Self { config, backend })
     }
 }
 
 impl<N: NetworkPolicy> Sandbox<N> {
     /// Create a sandbox with custom configuration
-    pub fn with_config(config: SandboxConfig<N>) -> SandboxResult<Self> {
+    pub fn with_config(config: SandboxConfig<N>) -> Result<Self> {
         let backend = platform::create_native_backend()?;
         Ok(Self { config, backend })
     }
@@ -46,7 +49,7 @@ impl<N: NetworkPolicy> Sandbox<N> {
     ///
     /// The script will be executed using the Python interpreter from the configured
     /// virtual environment, or the system Python if no venv is configured.
-    pub async fn run_python(&self, script: &str) -> SandboxResult<Output> {
+    pub async fn run_python(&self, script: &str) -> Result<Output> {
         // Determine the Python interpreter to use
         let python = if let Some(python_config) = self.config.python() {
             // Use venv Python if configured
@@ -60,7 +63,7 @@ impl<N: NetworkPolicy> Sandbox<N> {
             // Use system Python
             which::which("python3")
                 .or_else(|_| which::which("python"))
-                .map_err(|_| crate::error::SandboxError::PythonNotFound)?
+                .map_err(|_| crate::error::Error::PythonNotFound)?
         };
 
         self.command(python.to_string_lossy().to_string())

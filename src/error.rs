@@ -3,11 +3,11 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 /// Result type for sandbox operations
-pub type SandboxResult<T> = Result<T, SandboxError>;
+pub type Result<T> = std::result::Result<T, Error>;
 
 /// Errors that can occur during sandbox operations
 #[derive(Error, Debug)]
-pub enum SandboxError {
+pub enum Error {
     #[error("unsupported platform")]
     UnsupportedPlatform,
 
@@ -19,10 +19,10 @@ pub enum SandboxError {
     },
 
     #[error("sandbox initialization failed: {0}")]
-    SandboxInitFailed(String),
+    InitFailed(String),
 
     #[error("sandbox not enforced: {0}")]
-    SandboxNotEnforced(&'static str),
+    NotEnforced(&'static str),
 
     #[error("sandbox only partially enforced: {0}")]
     PartialEnforcement(&'static str),
@@ -59,4 +59,7 @@ pub enum SandboxError {
 
     #[error("FFI error: {0}")]
     FfiError(String),
+
+    #[error("I/O error: {0}")]
+    IoError(String),
 }

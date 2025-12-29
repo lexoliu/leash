@@ -5,7 +5,7 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 
-use crate::error::{SandboxError, SandboxResult};
+use crate::error::{Error, Result};
 
 #[link(name = "sandbox", kind = "dylib")]
 unsafe extern "C" {
@@ -29,9 +29,9 @@ pub struct SandboxProfile {
 
 impl SandboxProfile {
     /// Create a new sandbox profile from an SBPL string
-    pub fn new(sbpl: &str) -> SandboxResult<Self> {
+    pub fn new(sbpl: &str) -> Result<Self> {
         let profile_string = CString::new(sbpl)
-            .map_err(|_| SandboxError::InvalidProfile("Profile contains null bytes".to_string()))?;
+            .map_err(|_| Error::InvalidProfile("Profile contains null bytes".to_string()))?;
         Ok(Self { profile_string })
     }
 
@@ -41,7 +41,7 @@ impl SandboxProfile {
     /// This permanently restricts the current process. Once applied,
     /// the sandbox cannot be removed or relaxed.
     #[allow(dead_code)]
-    pub fn apply(&self) -> SandboxResult<()> {
+    pub fn apply(&self) -> Result<()> {
         let mut error_buf: *mut c_char = std::ptr::null_mut();
 
         // Empty parameter array (null-terminated)
@@ -66,7 +66,7 @@ impl SandboxProfile {
             } else {
                 "Unknown sandbox initialization error".to_string()
             };
-            return Err(SandboxError::SandboxInitFailed(error_msg));
+            return Err(Error::InitFailed(error_msg));
         }
 
         Ok(())
