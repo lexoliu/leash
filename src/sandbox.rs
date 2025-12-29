@@ -2,6 +2,9 @@ use std::path::PathBuf;
 use std::process::Output;
 use std::sync::{Arc, Mutex};
 
+use executor_core::async_executor::AsyncExecutor;
+use executor_core::{try_init_global_executor, DefaultExecutor, Executor};
+
 use crate::command::Command;
 use crate::config::{SandboxConfig, SandboxConfigData};
 use crate::error::Result;
@@ -89,31 +92,62 @@ pub struct Sandbox<N: NetworkPolicy = DenyAll> {
 impl Sandbox<DenyAll> {
     /// Create a new sandbox with default configuration
     ///
+    /// Uses the global executor from executor-core (initialized with AsyncExecutor if not set).
     /// Creates a random working directory in the current directory
     /// using four English words connected by hyphens.
     ///
     /// By default, all network access is denied (DenyAll policy).
-    pub fn new() -> Result<Self> {
+    pub async fn new() -> Result<Self> {
         let config = SandboxConfig::new()?;
-        Self::with_config(config)
+        // Initialize global executor with AsyncExecutor if not already set
+        let _ = try_init_global_executor(AsyncExecutor::new());
+        Self::create_internal(config, DefaultExecutor).await
+    }
+
+    /// Create a new sandbox with a custom executor
+    ///
+    /// Use this when you want to integrate with a specific async runtime
+    /// (e.g., tokio, async-std) instead of the default executor.
+    pub async fn with_executor<E: Executor + Clone + 'static>(executor: E) -> Result<Self> {
+        let config = SandboxConfig::new()?;
+        Self::create_internal(config, executor).await
     }
 }
 
 impl<N: NetworkPolicy + 'static> Sandbox<N> {
     /// Create a sandbox with custom configuration
     ///
-    /// The network policy from the config is used to create a local proxy
-    /// that filters all network traffic from sandboxed processes.
-    pub fn with_config(config: SandboxConfig<N>) -> Result<Self> {
+    /// Uses the global executor from executor-core (initialized with AsyncExecutor if not set).
+    pub async fn with_config(config: SandboxConfig<N>) -> Result<Self> {
+        // Initialize global executor with AsyncExecutor if not already set
+        let _ = try_init_global_executor(AsyncExecutor::new());
+        Self::create_internal(config, DefaultExecutor).await
+    }
+
+    /// Create a sandbox with custom configuration and executor
+    ///
+    /// Use this when you want full control over both the configuration
+    /// and the async runtime executor.
+    pub async fn with_config_and_executor<E: Executor + Clone + 'static>(
+        config: SandboxConfig<N>,
+        executor: E,
+    ) -> Result<Self> {
+        Self::create_internal(config, executor).await
+    }
+
+    /// Internal creation method
+    async fn create_internal<E: Executor + Clone + 'static>(
+        config: SandboxConfig<N>,
+        executor: E,
+    ) -> Result<Self> {
         let backend = platform::create_native_backend()?;
 
         // Extract the network policy for the proxy
         let (policy, config_data) = config.into_parts();
         let working_dir_path = config_data.working_dir.clone();
 
-        // Create and start the network proxy
-        let proxy = NetworkProxy::new(policy)?;
-        proxy.start()?;
+        // Create and start the network proxy with the executor
+        let proxy = NetworkProxy::new(policy, executor).await?;
 
         tracing::info!(
             proxy_addr = %proxy.addr(),
@@ -241,12 +275,11 @@ impl<N: NetworkPolicy> Drop for Sandbox<N> {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_sandbox_creation() {
-        let result = Sandbox::new();
+    #[tokio::test]
+    async fn test_sandbox_creation() {
         // This may fail on non-macOS platforms currently
         if cfg!(target_os = "macos") {
-            let sandbox = result.unwrap();
+            let sandbox = Sandbox::new().await.unwrap();
             let working_dir = sandbox.working_dir().to_path_buf();
             assert!(working_dir.exists());
             drop(sandbox);
@@ -255,11 +288,11 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_keep_working_dir() {
+    #[tokio::test]
+    async fn test_keep_working_dir() {
         if cfg!(target_os = "macos") {
             let working_dir = {
-                let mut sandbox = Sandbox::new().unwrap();
+                let mut sandbox = Sandbox::new().await.unwrap();
                 sandbox.keep_working_dir();
                 sandbox.working_dir().to_path_buf()
             };

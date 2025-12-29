@@ -6,7 +6,7 @@ use native_sandbox::Sandbox;
 async fn main() -> native_sandbox::Result<()> {
     tracing_subscriber::fmt::init();
 
-    let sandbox = Sandbox::new()?;
+    let sandbox = Sandbox::new().await?;
 
     // Try to make a network request - this should fail
     let output = sandbox

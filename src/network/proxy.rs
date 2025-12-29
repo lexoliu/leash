@@ -3,37 +3,64 @@
 //! This module implements a local HTTP/HTTPS proxy that intercepts network
 //! requests from sandboxed processes and applies NetworkPolicy filtering.
 
-use std::io::{self, BufRead, BufReader, Read, Write};
-use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
+use std::future::Future;
+use std::net::SocketAddr;
+use std::pin::Pin;
+use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread;
+use std::task::{Context, Poll};
+
+use async_net::{TcpListener, TcpStream};
+use bytes::Bytes;
+use executor_core::{Executor, Task};
+use futures_lite::io::{AsyncRead, AsyncWrite};
+use futures_lite::StreamExt;
+use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
+use hyper::body::Incoming;
+use hyper::rt::Executor as HyperExecutor;
+use hyper::server::conn::http1;
+use hyper::service::service_fn;
+use hyper::{Method, Request, Response, StatusCode};
 
 use crate::error::{Error, Result};
 use crate::network::{ConnectionDirection, DomainRequest, NetworkPolicy};
 
 /// A network proxy that filters requests based on a NetworkPolicy
 pub struct NetworkProxy<N: NetworkPolicy> {
+    #[allow(dead_code)]
     policy: Arc<N>,
-    listener: TcpListener,
     addr: SocketAddr,
     running: Arc<AtomicBool>,
 }
 
 impl<N: NetworkPolicy + 'static> NetworkProxy<N> {
-    /// Create a new network proxy with the given policy
-    pub fn new(policy: N) -> Result<Self> {
-        // Bind to a random available port on localhost
-        let listener = TcpListener::bind("127.0.0.1:0")?;
+    /// Create a new network proxy with the given policy and executor
+    ///
+    /// This is internal - Sandbox provides the executor.
+    pub(crate) async fn new<E: Executor + Clone + 'static>(policy: N, executor: E) -> Result<Self> {
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
         let addr = listener.local_addr()?;
 
         tracing::debug!(addr = %addr, "network proxy: bound to address");
 
+        let policy = Arc::new(policy);
+        let running = Arc::new(AtomicBool::new(true));
+
+        // Spawn the accept loop
+        let policy_clone = Arc::clone(&policy);
+        let running_clone = Arc::clone(&running);
+
+        executor
+            .spawn(run_proxy(listener, policy_clone, running_clone, executor.clone()))
+            .detach();
+
+        tracing::debug!("network proxy: started");
+
         Ok(Self {
-            policy: Arc::new(policy),
-            listener,
+            policy,
             addr,
-            running: Arc::new(AtomicBool::new(false)),
+            running,
         })
     }
 
@@ -45,53 +72,6 @@ impl<N: NetworkPolicy + 'static> NetworkProxy<N> {
     /// Get the proxy URL for environment variables
     pub fn proxy_url(&self) -> String {
         format!("http://{}", self.addr)
-    }
-
-    /// Start the proxy server in a background thread
-    pub fn start(&self) -> Result<()> {
-        if self.running.swap(true, Ordering::SeqCst) {
-            return Ok(()); // Already running
-        }
-
-        let listener = self.listener.try_clone()?;
-        let policy = Arc::clone(&self.policy);
-        let running = Arc::clone(&self.running);
-
-        thread::spawn(move || {
-            tracing::debug!("network proxy: started");
-
-            while running.load(Ordering::SeqCst) {
-                // Set a timeout so we can check the running flag periodically
-                listener
-                    .set_nonblocking(true)
-                    .expect("Failed to set non-blocking");
-
-                match listener.accept() {
-                    Ok((stream, peer_addr)) => {
-                        let policy = Arc::clone(&policy);
-                        thread::spawn(move || {
-                            if let Err(e) = handle_connection(stream, peer_addr, &*policy) {
-                                tracing::warn!(error = %e, "network proxy: connection error");
-                            }
-                        });
-                    }
-                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        // No connection available, sleep briefly
-                        thread::sleep(std::time::Duration::from_millis(10));
-                    }
-                    Err(e) => {
-                        if running.load(Ordering::SeqCst) {
-                            tracing::error!(error = %e, "network proxy: accept error");
-                        }
-                        break;
-                    }
-                }
-            }
-
-            tracing::debug!("network proxy: stopped");
-        });
-
-        Ok(())
     }
 
     /// Stop the proxy server
@@ -106,252 +86,406 @@ impl<N: NetworkPolicy> Drop for NetworkProxy<N> {
     }
 }
 
-/// Handle a single proxy connection
-fn handle_connection<N: NetworkPolicy>(
-    mut client: TcpStream,
-    peer_addr: SocketAddr,
-    policy: &N,
-) -> Result<()> {
-    client.set_nonblocking(false)?;
+/// Wrapper for executor to implement hyper::rt::Executor
+struct ExecutorWrapper<E>(Arc<E>);
 
-    let mut reader = BufReader::new(client.try_clone()?);
-    let mut request_line = String::new();
-    reader.read_line(&mut request_line)?;
+impl<E> ExecutorWrapper<E> {
+    fn new(executor: E) -> Self {
+        Self(Arc::new(executor))
+    }
+}
 
-    let parts: Vec<&str> = request_line.trim().split_whitespace().collect();
-    if parts.len() < 2 {
-        return Err(Error::ProxyError("Invalid request line".to_string()));
+impl<E> Clone for ExecutorWrapper<E> {
+    fn clone(&self) -> Self {
+        Self(Arc::clone(&self.0))
+    }
+}
+
+impl<Fut, E> HyperExecutor<Fut> for ExecutorWrapper<E>
+where
+    Fut: Future + Send + 'static,
+    Fut::Output: Send + 'static,
+    E: Executor + 'static,
+{
+    fn execute(&self, fut: Fut) {
+        self.0.spawn(fut).detach();
+    }
+}
+
+/// Wrapper for AsyncRead + AsyncWrite to implement hyper::rt::Read/Write
+struct ConnectionWrapper<C>(C);
+
+impl<C: Unpin + AsyncRead> hyper::rt::Read for ConnectionWrapper<C> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        mut buf: hyper::rt::ReadBufCursor<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        let inner = &mut self.get_mut().0;
+
+        // SAFETY: `buf.as_mut()` gives us a `&mut [MaybeUninit<u8>]`.
+        // We cast it to `&mut [u8]` and guarantee we will only write `n` bytes and call `advance(n)`
+        let buffer = unsafe { &mut *(ptr::from_mut(buf.as_mut()) as *mut [u8]) };
+
+        match Pin::new(inner).poll_read(cx, buffer) {
+            Poll::Ready(Ok(n)) => {
+                // SAFETY: we just wrote `n` bytes into `buffer`, must now advance `n`
+                unsafe {
+                    buf.advance(n);
+                }
+                Poll::Ready(Ok(()))
+            }
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+impl<C: Unpin + AsyncWrite> hyper::rt::Write for ConnectionWrapper<C> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.get_mut().0).poll_write(cx, buf)
     }
 
-    let method = parts[0];
-    let target = parts[1];
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.get_mut().0).poll_flush(cx)
+    }
 
-    tracing::debug!(method = %method, target = %target, peer = %peer_addr, "network proxy: request");
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.get_mut().0).poll_close(cx)
+    }
+}
 
-    if method == "CONNECT" {
-        // HTTPS tunnel request
-        handle_connect(&mut client, reader, target, policy)
+/// Run the proxy server accept loop
+async fn run_proxy<N: NetworkPolicy + 'static, E: Executor + Clone + 'static>(
+    listener: TcpListener,
+    policy: Arc<N>,
+    running: Arc<AtomicBool>,
+    executor: E,
+) {
+    let mut incoming = listener.incoming();
+
+    while running.load(Ordering::SeqCst) {
+        let accept_result = futures_lite::future::or(
+            async { incoming.next().await },
+            async {
+                futures_lite::future::yield_now().await;
+                async_io::Timer::after(std::time::Duration::from_millis(100)).await;
+                None
+            },
+        )
+        .await;
+
+        match accept_result {
+            Some(Ok(stream)) => {
+                let peer_addr = stream.peer_addr().ok();
+                let policy = Arc::clone(&policy);
+                let exec = executor.clone();
+
+                executor
+                    .spawn(async move {
+                        if let Err(e) = handle_connection(stream, peer_addr, policy, exec).await {
+                            tracing::warn!(error = %e, "network proxy: connection error");
+                        }
+                    })
+                    .detach();
+            }
+            Some(Err(e)) => {
+                if running.load(Ordering::SeqCst) {
+                    tracing::error!(error = %e, "network proxy: accept error");
+                }
+            }
+            None => {
+                // Timeout, continue loop to check running flag
+            }
+        }
+    }
+
+    tracing::debug!("network proxy: stopped");
+}
+
+/// Handle a single proxy connection
+async fn handle_connection<N: NetworkPolicy + 'static, E: Executor + 'static>(
+    stream: TcpStream,
+    peer_addr: Option<SocketAddr>,
+    policy: Arc<N>,
+    executor: E,
+) -> Result<()> {
+    let io = ConnectionWrapper(stream);
+    let hyper_executor = ExecutorWrapper::new(executor);
+
+    http1::Builder::new()
+        .preserve_header_case(true)
+        .title_case_headers(true)
+        .serve_connection(
+            io,
+            service_fn(move |req| {
+                let policy = Arc::clone(&policy);
+                let exec = hyper_executor.clone();
+                async move { proxy_request(req, peer_addr, policy, exec).await }
+            }),
+        )
+        .with_upgrades()
+        .await
+        .map_err(|e| Error::ProxyError(e.to_string()))
+}
+
+/// Process a proxy request
+async fn proxy_request<N: NetworkPolicy, E: Executor + 'static>(
+    req: Request<Incoming>,
+    peer_addr: Option<SocketAddr>,
+    policy: Arc<N>,
+    executor: ExecutorWrapper<E>,
+) -> std::result::Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+    tracing::debug!(
+        method = %req.method(),
+        uri = %req.uri(),
+        peer = ?peer_addr,
+        "network proxy: request"
+    );
+
+    if req.method() == Method::CONNECT {
+        handle_connect(req, policy, executor).await
     } else {
-        // Regular HTTP request
-        handle_http(&mut client, reader, &request_line, target, policy)
+        handle_http(req, policy, executor).await
     }
 }
 
 /// Handle CONNECT method for HTTPS tunneling
-fn handle_connect<N: NetworkPolicy>(
-    client: &mut TcpStream,
-    mut reader: BufReader<TcpStream>,
-    target: &str,
-    policy: &N,
-) -> Result<()> {
-    // Parse host:port from target
-    let (host, port) = parse_host_port(target, 443)?;
-
-    // Read and discard headers until empty line
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        if line.trim().is_empty() {
-            break;
-        }
-    }
+async fn handle_connect<N: NetworkPolicy, E: Executor + 'static>(
+    req: Request<Incoming>,
+    policy: Arc<N>,
+    executor: ExecutorWrapper<E>,
+) -> std::result::Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+    let host_port = req
+        .uri()
+        .authority()
+        .map(|a| a.to_string())
+        .unwrap_or_default();
+    let (host, port) = parse_host_port(&host_port, 443);
 
     // Check policy
-    let request = DomainRequest::new(host.clone(), port, ConnectionDirection::Outbound, 0);
-
-    // Use blocking check - in a real async implementation, this would be async
-    let allowed = futures_lite::future::block_on(policy.check(&request));
+    let domain_req = DomainRequest::new(host.clone(), port, ConnectionDirection::Outbound, 0);
+    let allowed = policy.check(&domain_req).await;
 
     if !allowed {
         tracing::info!(host = %host, port = port, "network proxy: connection denied by policy");
-        client.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\nBlocked by sandbox policy\r\n")?;
-        return Ok(());
+        return Ok(Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(full_body("Blocked by sandbox policy"))
+            .unwrap());
     }
 
     tracing::debug!(host = %host, port = port, "network proxy: connection allowed");
 
-    // Connect to the target
+    // Spawn a task to handle the tunnel after upgrade
     let target_addr = format!("{}:{}", host, port);
-    let mut target_stream = match TcpStream::connect(&target_addr) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!(target = %target_addr, error = %e, "network proxy: failed to connect");
-            client.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")?;
-            return Ok(());
+
+    executor.execute(async move {
+        match hyper::upgrade::on(req).await {
+            Ok(upgraded) => {
+                match TcpStream::connect(&target_addr).await {
+                    Ok(target_stream) => {
+                        if let Err(e) = tunnel(upgraded, target_stream).await {
+                            tracing::warn!(error = %e, "network proxy: tunnel error");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(target = %target_addr, error = %e, "network proxy: failed to connect");
+                    }
+                }
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "network proxy: upgrade error");
+            }
         }
-    };
+    });
 
-    // Send 200 Connection Established
-    client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
-
-    // Tunnel data between client and target
-    tunnel(client, &mut target_stream)?;
-
-    Ok(())
+    // Return 200 Connection Established
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(empty_body())
+        .unwrap())
 }
 
 /// Handle regular HTTP request
-fn handle_http<N: NetworkPolicy>(
-    client: &mut TcpStream,
-    mut reader: BufReader<TcpStream>,
-    request_line: &str,
-    target: &str,
-    policy: &N,
-) -> Result<()> {
-    // Parse URL to get host
-    let (host, port, path) = parse_http_url(target)?;
-
-    // Read headers
-    let mut headers = Vec::new();
-    loop {
-        let mut line = String::new();
-        reader.read_line(&mut line)?;
-        if line.trim().is_empty() {
-            break;
-        }
-        headers.push(line);
-    }
+async fn handle_http<N: NetworkPolicy, E: Executor + 'static>(
+    req: Request<Incoming>,
+    policy: Arc<N>,
+    executor: ExecutorWrapper<E>,
+) -> std::result::Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
+    let uri = req.uri();
+    let host = uri.host().unwrap_or_default().to_string();
+    let port = uri.port_u16().unwrap_or(80);
 
     // Check policy
-    let request = DomainRequest::new(host.clone(), port, ConnectionDirection::Outbound, 0);
-    let allowed = futures_lite::future::block_on(policy.check(&request));
+    let domain_req = DomainRequest::new(host.clone(), port, ConnectionDirection::Outbound, 0);
+    let allowed = policy.check(&domain_req).await;
 
     if !allowed {
         tracing::info!(host = %host, port = port, "network proxy: HTTP request denied by policy");
-        client.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\nBlocked by sandbox policy\r\n")?;
-        return Ok(());
+        return Ok(Response::builder()
+            .status(StatusCode::FORBIDDEN)
+            .body(full_body("Blocked by sandbox policy"))
+            .unwrap());
     }
 
-    tracing::debug!(host = %host, port = port, path = %path, "network proxy: HTTP request allowed");
+    tracing::debug!(host = %host, port = port, path = %uri.path(), "network proxy: HTTP request allowed");
 
-    // Connect to target
+    // Connect to target and forward request
     let target_addr = format!("{}:{}", host, port);
-    let mut target_stream = match TcpStream::connect(&target_addr) {
+    let target_stream = match TcpStream::connect(&target_addr).await {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!(target = %target_addr, error = %e, "network proxy: failed to connect");
-            client.write_all(b"HTTP/1.1 502 Bad Gateway\r\n\r\n")?;
-            return Ok(());
+            return Ok(Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .body(full_body("Failed to connect to target"))
+                .unwrap());
         }
     };
 
-    // Forward the request with modified path (remove scheme and host)
-    let method = request_line.split_whitespace().next().unwrap_or("GET");
-    let version = request_line
-        .split_whitespace()
-        .last()
-        .unwrap_or("HTTP/1.1");
-    let new_request_line = format!("{} {} {}\r\n", method, path, version);
-    target_stream.write_all(new_request_line.as_bytes())?;
+    let io = ConnectionWrapper(target_stream);
 
-    // Forward headers
-    for header in &headers {
-        target_stream.write_all(header.as_bytes())?;
+    let (mut sender, conn) = match hyper::client::conn::http1::handshake(io).await {
+        Ok(parts) => parts,
+        Err(e) => {
+            tracing::warn!(error = %e, "network proxy: handshake error");
+            return Ok(Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .body(full_body("Handshake failed"))
+                .unwrap());
+        }
+    };
+
+    // Spawn connection driver
+    executor.execute(async move {
+        if let Err(e) = conn.await {
+            tracing::warn!(error = %e, "network proxy: connection driver error");
+        }
+    });
+
+    // Build the request to forward
+    let path = uri.path_and_query().map(|pq| pq.as_str()).unwrap_or("/");
+    let mut forward_req = Request::builder()
+        .method(req.method())
+        .uri(path)
+        .version(req.version());
+
+    // Copy headers
+    for (name, value) in req.headers() {
+        forward_req = forward_req.header(name, value);
     }
-    target_stream.write_all(b"\r\n")?;
 
-    // Forward response back to client
-    let mut response = Vec::new();
-    std::io::copy(&mut target_stream, &mut response)?;
-    client.write_all(&response)?;
+    let forward_req = match forward_req.body(req.into_body()) {
+        Ok(req) => req,
+        Err(e) => {
+            tracing::warn!(error = %e, "network proxy: request build error");
+            return Ok(Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(full_body("Request build error"))
+                .unwrap());
+        }
+    };
 
-    Ok(())
+    match sender.send_request(forward_req).await {
+        Ok(response) => Ok(response.map(|b| b.boxed())),
+        Err(e) => {
+            tracing::warn!(error = %e, "network proxy: forward error");
+            Ok(Response::builder()
+                .status(StatusCode::BAD_GATEWAY)
+                .body(full_body("Forward failed"))
+                .unwrap())
+        }
+    }
 }
 
-/// Parse host:port from CONNECT target
-fn parse_host_port(target: &str, default_port: u16) -> Result<(String, u16)> {
+/// Parse host:port from target string
+fn parse_host_port(target: &str, default_port: u16) -> (String, u16) {
     if let Some(colon_pos) = target.rfind(':') {
         let host = target[..colon_pos].to_string();
-        let port: u16 = target[colon_pos + 1..]
-            .parse()
-            .map_err(|_| Error::ProxyError(format!("Invalid port in: {}", target)))?;
-        Ok((host, port))
-    } else {
-        Ok((target.to_string(), default_port))
+        if let Ok(port) = target[colon_pos + 1..].parse() {
+            return (host, port);
+        }
+    }
+    (target.to_string(), default_port)
+}
+
+/// Bidirectional tunnel between upgraded connection and target
+async fn tunnel(
+    upgraded: hyper::upgrade::Upgraded,
+    target: TcpStream,
+) -> std::result::Result<(), std::io::Error> {
+    use futures_lite::io::{copy, split};
+
+    // Wrap upgraded connection to implement AsyncRead/AsyncWrite
+    let upgraded = UpgradedWrapper(upgraded);
+
+    let (client_read, client_write) = split(upgraded);
+    let (target_read, target_write) = split(target);
+
+    let client_to_target = copy(client_read, target_write);
+    let target_to_client = copy(target_read, client_write);
+
+    // Run both directions concurrently
+    let _ = futures_lite::future::zip(client_to_target, target_to_client).await;
+
+    Ok(())
+}
+
+/// Wrapper for hyper::upgrade::Upgraded to implement futures_lite AsyncRead/AsyncWrite
+struct UpgradedWrapper(hyper::upgrade::Upgraded);
+
+impl AsyncRead for UpgradedWrapper {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut [u8],
+    ) -> Poll<std::io::Result<usize>> {
+        // Create a ReadBufCursor from our buffer
+        let mut read_buf = hyper::rt::ReadBuf::new(buf);
+
+        match hyper::rt::Read::poll_read(Pin::new(&mut self.0), cx, read_buf.unfilled()) {
+            Poll::Ready(Ok(())) => Poll::Ready(Ok(read_buf.filled().len())),
+            Poll::Ready(Err(e)) => Poll::Ready(Err(e)),
+            Poll::Pending => Poll::Pending,
+        }
     }
 }
 
-/// Parse HTTP URL to extract host, port, and path
-fn parse_http_url(url: &str) -> Result<(String, u16, String)> {
-    // Handle absolute URLs (http://host:port/path)
-    let url = if let Some(stripped) = url.strip_prefix("http://") {
-        stripped
-    } else if let Some(stripped) = url.strip_prefix("https://") {
-        stripped
-    } else {
-        url
-    };
+impl AsyncWrite for UpgradedWrapper {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        hyper::rt::Write::poll_write(Pin::new(&mut self.0), cx, buf)
+    }
 
-    // Split host:port and path
-    let (host_port, path) = if let Some(slash_pos) = url.find('/') {
-        (&url[..slash_pos], &url[slash_pos..])
-    } else {
-        (url, "/")
-    };
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        hyper::rt::Write::poll_flush(Pin::new(&mut self.0), cx)
+    }
 
-    // Parse host and port
-    let (host, port) = parse_host_port(host_port, 80)?;
-
-    Ok((host, port, path.to_string()))
+    fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        hyper::rt::Write::poll_shutdown(Pin::new(&mut self.0), cx)
+    }
 }
 
-/// Tunnel data bidirectionally between two streams
-fn tunnel(client: &mut TcpStream, target: &mut TcpStream) -> Result<()> {
-    // Clone streams for bidirectional transfer
-    let mut client_read = client.try_clone()?;
-    let mut client_write = client.try_clone()?;
-    let mut target_read = target.try_clone()?;
-    let mut target_write = target.try_clone()?;
+/// Create an empty body
+fn empty_body() -> BoxBody<Bytes, hyper::Error> {
+    Empty::<Bytes>::new()
+        .map_err(|never| match never {})
+        .boxed()
+}
 
-    client_read.set_nonblocking(true)?;
-    target_read.set_nonblocking(true)?;
-
-    // Client -> Target
-    let handle1 = thread::spawn(move || -> io::Result<()> {
-        let mut buf = [0u8; 8192];
-        loop {
-            match client_read.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    if target_write.write_all(&buf[..n]).is_err() {
-                        break;
-                    }
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    thread::sleep(std::time::Duration::from_millis(1));
-                }
-                Err(_) => break,
-            }
-        }
-        let _ = target_write.shutdown(Shutdown::Write);
-        Ok(())
-    });
-
-    // Target -> Client
-    let handle2 = thread::spawn(move || -> io::Result<()> {
-        let mut buf = [0u8; 8192];
-        loop {
-            match target_read.read(&mut buf) {
-                Ok(0) => break,
-                Ok(n) => {
-                    if client_write.write_all(&buf[..n]).is_err() {
-                        break;
-                    }
-                }
-                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    thread::sleep(std::time::Duration::from_millis(1));
-                }
-                Err(_) => break,
-            }
-        }
-        let _ = client_write.shutdown(Shutdown::Write);
-        Ok(())
-    });
-
-    let _ = handle1.join();
-    let _ = handle2.join();
-
-    Ok(())
+/// Create a body from a string
+fn full_body(s: &'static str) -> BoxBody<Bytes, hyper::Error> {
+    Full::new(Bytes::from(s))
+        .map_err(|never| match never {})
+        .boxed()
 }
 
 #[cfg(test)]
@@ -360,25 +494,12 @@ mod tests {
 
     #[test]
     fn test_parse_host_port() {
-        let (host, port) = parse_host_port("example.com:443", 80).unwrap();
+        let (host, port) = parse_host_port("example.com:443", 80);
         assert_eq!(host, "example.com");
         assert_eq!(port, 443);
 
-        let (host, port) = parse_host_port("example.com", 80).unwrap();
+        let (host, port) = parse_host_port("example.com", 80);
         assert_eq!(host, "example.com");
         assert_eq!(port, 80);
-    }
-
-    #[test]
-    fn test_parse_http_url() {
-        let (host, port, path) = parse_http_url("http://example.com/path").unwrap();
-        assert_eq!(host, "example.com");
-        assert_eq!(port, 80);
-        assert_eq!(path, "/path");
-
-        let (host, port, path) = parse_http_url("http://example.com:8080/path").unwrap();
-        assert_eq!(host, "example.com");
-        assert_eq!(port, 8080);
-        assert_eq!(path, "/path");
     }
 }

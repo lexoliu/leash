@@ -8,7 +8,7 @@ async fn main() -> native_sandbox::Result<()> {
     tracing_subscriber::fmt::init();
 
     // Create a sandbox with default configuration (network denied)
-    let sandbox = Sandbox::new()?;
+    let sandbox = Sandbox::new().await?;
 
     // Run a simple command in the sandbox
     let output = sandbox

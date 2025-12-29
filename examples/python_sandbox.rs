@@ -22,7 +22,7 @@ async fn main() -> native_sandbox::Result<()> {
         .python(PythonConfig::builder().venv(venv_config).build())
         .build()?;
 
-    let sandbox = Sandbox::with_config(config)?;
+    let sandbox = Sandbox::with_config(config).await?;
 
     // Run a simple Python script
     println!("\nRunning Python in sandbox...");

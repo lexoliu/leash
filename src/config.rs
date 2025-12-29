@@ -285,14 +285,14 @@ impl SandboxConfig<DenyAll> {
     pub fn new() -> Result<Self> {
         SandboxConfigBuilder::default().build()
     }
-}
 
-impl<N: NetworkPolicy> SandboxConfig<N> {
     /// Create a new builder for SandboxConfig
     pub fn builder() -> SandboxConfigBuilder<DenyAll> {
         SandboxConfigBuilder::default()
     }
+}
 
+impl<N: NetworkPolicy> SandboxConfig<N> {
     /// Consume the config and return the network policy and remaining config data
     ///
     /// This is used internally by Sandbox to extract the policy for the NetworkProxy.

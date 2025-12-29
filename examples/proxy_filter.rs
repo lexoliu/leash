@@ -1,6 +1,9 @@
 //! Test network proxy filtering with AllowList policy
+//!
+//! This example demonstrates how to create a sandbox with network filtering
+//! that only allows access to specific domains.
 
-use native_sandbox::{AllowList, NetworkProxy, Result};
+use native_sandbox::{AllowList, Sandbox, SandboxConfig, Result};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -9,55 +12,52 @@ async fn main() -> Result<()> {
     // Create an AllowList policy that only allows httpbin.org
     let policy = AllowList::new(["httpbin.org", "*.httpbin.org"]);
 
-    // Create and start the proxy
-    let proxy = NetworkProxy::new(policy)?;
-    println!("Proxy started at: {}", proxy.proxy_url());
+    // Create sandbox with the network policy
+    let config = SandboxConfig::builder()
+        .network(policy)
+        .build()?;
 
-    proxy.start()?;
+    let sandbox = Sandbox::with_config(config).await?;
+    println!("Sandbox created with proxy at: {}", sandbox.proxy_url());
 
-    // Test with curl using the proxy
+    // Test with curl using the proxy (via sandbox command)
     println!("\n--- Testing allowed domain (httpbin.org) ---");
-    let status = std::process::Command::new("curl")
-        .env("http_proxy", proxy.proxy_url())
-        .env("https_proxy", proxy.proxy_url())
+    let output = sandbox.command("curl")
         .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "http://httpbin.org/get"])
-        .status()?;
-    println!("httpbin.org result: exit={}", status);
+        .output()
+        .await?;
+    println!("httpbin.org result: exit={}, http_code={}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout));
 
     println!("\n--- Testing blocked domain (example.com) ---");
-    let status = std::process::Command::new("curl")
-        .env("http_proxy", proxy.proxy_url())
-        .env("https_proxy", proxy.proxy_url())
+    let output = sandbox.command("curl")
         .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "http://example.com"])
-        .status()?;
-    println!("example.com result: exit={}", status);
+        .output()
+        .await?;
+    println!("example.com result: exit={}, http_code={}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout));
 
     println!("\n--- Testing HTTPS to allowed domain ---");
-    let output = std::process::Command::new("curl")
-        .env("http_proxy", proxy.proxy_url())
-        .env("https_proxy", proxy.proxy_url())
+    let output = sandbox.command("curl")
         .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "https://httpbin.org/get"])
-        .output()?;
-    println!(
-        "HTTPS httpbin.org: exit={}, response={}",
+        .output()
+        .await?;
+    println!("HTTPS httpbin.org: exit={}, http_code={}",
         output.status,
-        String::from_utf8_lossy(&output.stdout)
-    );
+        String::from_utf8_lossy(&output.stdout));
 
     println!("\n--- Testing HTTPS to blocked domain ---");
-    let output = std::process::Command::new("curl")
-        .env("http_proxy", proxy.proxy_url())
-        .env("https_proxy", proxy.proxy_url())
+    let output = sandbox.command("curl")
         .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", "https://example.com"])
-        .output()?;
-    println!(
-        "HTTPS example.com: exit={}, response={}",
+        .output()
+        .await?;
+    println!("HTTPS example.com: exit={}, http_code={}",
         output.status,
-        String::from_utf8_lossy(&output.stdout)
-    );
+        String::from_utf8_lossy(&output.stdout));
 
-    proxy.stop();
-    println!("\nProxy stopped");
+    println!("\nSandbox will be dropped (proxy stops, working dir cleaned)");
 
     Ok(())
 }

@@ -24,7 +24,7 @@ async fn main() -> native_sandbox::Result<()> {
         .executable_path("/usr/sbin/system_profiler")
         .build()?;
 
-    let sandbox = Sandbox::with_config(config)?;
+    let sandbox = Sandbox::with_config(config).await?;
 
     let output = sandbox
         .command("python3")
@@ -49,7 +49,7 @@ async fn main() -> native_sandbox::Result<()> {
         .executable_path("/usr/sbin/system_profiler")
         .build()?;
 
-    let sandbox = Sandbox::with_config(config)?;
+    let sandbox = Sandbox::with_config(config).await?;
 
     let output = sandbox
         .command("python3")

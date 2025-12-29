@@ -21,7 +21,7 @@ async fn main() -> native_sandbox::Result<()> {
         .readable_path(&scripts_dir)
         .build()?;
 
-    let sandbox = Sandbox::with_config(config)?;
+    let sandbox = Sandbox::with_config(config).await?;
 
     let output = sandbox
         .command("python3")
@@ -43,7 +43,7 @@ async fn main() -> native_sandbox::Result<()> {
         .readable_path(&scripts_dir)
         .build()?;
 
-    let sandbox = Sandbox::with_config(config)?;
+    let sandbox = Sandbox::with_config(config).await?;
 
     let output = sandbox
         .command("python3")

@@ -1,4 +1,3 @@
-mod ffi;
 mod profile;
 
 use std::process::{Command, Output, Stdio};

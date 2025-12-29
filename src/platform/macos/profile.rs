@@ -49,7 +49,10 @@ pub fn generate_profile(config: &SandboxConfigData, proxy_port: u16) -> Result<S
         tracing::debug!(path = %python_config.venv().path().display(), "sandbox: allow python venv");
     }
 
-    tracing::debug!(proxy_port = proxy_port, "sandbox: network restricted to proxy port only");
+    tracing::debug!(
+        proxy_port = proxy_port,
+        "sandbox: network restricted to proxy port only"
+    );
 
     let security = config.security();
     if security.allow_gpu {
@@ -124,7 +127,7 @@ fn escape_path(path: &Path) -> String {
                 return String::new();
             }
             // SBPL special characters that could break parsing if unquoted
-            // These are safe inside a quoted string but we escape for safety
+            // These are safe inside a quoted string
             '(' | ')' | ';' => {
                 // These are safe inside quotes, but log a warning
                 tracing::warn!(path = %path.display(), char = %c, "path contains SBPL special character");

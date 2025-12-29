@@ -154,8 +154,8 @@ where
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_deny_all() {
+    #[tokio::test]
+    async fn test_deny_all() {
         let policy = DenyAll;
         let request = DomainRequest::new(
             "example.com".to_string(),
@@ -164,15 +164,11 @@ mod tests {
             1234,
         );
 
-        // Use a simple executor for testing
-        let result = std::thread::scope(|_| {
-            futures_lite::future::block_on(policy.check(&request))
-        });
-        assert!(!result);
+        assert!(!policy.check(&request).await);
     }
 
-    #[test]
-    fn test_allow_all() {
+    #[tokio::test]
+    async fn test_allow_all() {
         let policy = AllowAll;
         let request = DomainRequest::new(
             "example.com".to_string(),
@@ -181,10 +177,7 @@ mod tests {
             1234,
         );
 
-        let result = std::thread::scope(|_| {
-            futures_lite::future::block_on(policy.check(&request))
-        });
-        assert!(result);
+        assert!(policy.check(&request).await);
     }
 
     #[test]

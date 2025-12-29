@@ -8,4 +8,6 @@
 - Do not leave legacy code for fallback. If a feature is deprecated, remove all related code.
 - No simplify, no stub, no fallback, no patch.
 - Import third-party crates instead of writing your own implementation. Less code is better.
+- Async first and runtime agnostic.
+- Be respctful to lints, do not disable lints without strong reason.
 </important>
