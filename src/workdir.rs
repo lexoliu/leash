@@ -10,18 +10,17 @@ use crate::error::{Error, Result};
 
 /// Word list for generating random directory names
 const WORDS: &[&str] = &[
-    "apple", "banana", "cherry", "dragon", "eagle", "falcon", "garden", "harbor",
-    "island", "jungle", "kitten", "lemon", "mango", "night", "ocean", "planet",
-    "queen", "river", "silver", "tiger", "umbrella", "violet", "winter", "yellow",
-    "zebra", "anchor", "bridge", "castle", "desert", "ember", "forest", "glacier",
-    "horizon", "ivory", "jasmine", "kingdom", "lantern", "meadow", "nebula", "orchid",
-    "phoenix", "quartz", "rainbow", "shadow", "thunder", "urban", "velvet", "whisper",
-    "crystal", "dolphin", "eclipse", "firefly", "granite", "hollow", "indigo", "journey",
-    "karma", "lotus", "marble", "nomad", "oasis", "prism", "quest", "ripple",
-    "sphinx", "temple", "unity", "vortex", "willow", "xenon", "yonder", "zenith",
-    "amber", "blazer", "copper", "dusk", "ether", "flame", "golden", "haze",
-    "iron", "jade", "kindle", "lunar", "mystic", "nova", "onyx", "pearl",
-    "radiant", "storm", "tidal", "ultra", "vivid", "wave", "azure", "breeze",
+    "apple", "banana", "cherry", "dragon", "eagle", "falcon", "garden", "harbor", "island",
+    "jungle", "kitten", "lemon", "mango", "night", "ocean", "planet", "queen", "river", "silver",
+    "tiger", "umbrella", "violet", "winter", "yellow", "zebra", "anchor", "bridge", "castle",
+    "desert", "ember", "forest", "glacier", "horizon", "ivory", "jasmine", "kingdom", "lantern",
+    "meadow", "nebula", "orchid", "phoenix", "quartz", "rainbow", "shadow", "thunder", "urban",
+    "velvet", "whisper", "crystal", "dolphin", "eclipse", "firefly", "lexo", "granite", "hollow",
+    "indigo", "journey", "karma", "lotus", "marble", "nomad", "oasis", "prism", "quest", "ripple",
+    "sphinx", "temple", "unity", "vortex", "willow", "xenon", "yonder", "zenith", "amber",
+    "blazer", "copper", "dusk", "ether", "flame", "golden", "haze", "iron", "jade", "kindle",
+    "lunar", "mystic", "nova", "onyx", "pearl", "radiant", "storm", "tidal", "ultra", "vivid",
+    "wave", "azure", "breeze",
 ];
 
 /// Working directory for the sandbox
@@ -56,8 +55,7 @@ impl WorkingDir {
     /// The name is generated using four random English words connected by hyphens,
     /// e.g., `./amber-forest-thunder-pearl`
     pub fn random() -> Result<Self> {
-        let current_dir =
-            std::env::current_dir().map_err(|e| Error::IoError(e.to_string()))?;
+        let current_dir = std::env::current_dir().map_err(|e| Error::IoError(e.to_string()))?;
         Self::random_in(&current_dir)
     }
 
@@ -163,10 +161,7 @@ fn generate_random_name() -> String {
     use rand::thread_rng;
 
     let mut rng = thread_rng();
-    let words: Vec<&str> = WORDS
-        .choose_multiple(&mut rng, 4)
-        .copied()
-        .collect();
+    let words: Vec<&str> = WORDS.choose_multiple(&mut rng, 4).copied().collect();
 
     words.join("-")
 }
