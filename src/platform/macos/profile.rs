@@ -29,6 +29,7 @@ struct SandboxProfile {
     working_dir: String,
     python_venv_path: Option<String>,
     network_mode: String,
+    security_deny_rules: Vec<String>,
 }
 
 /// Generate an SBPL profile from sandbox configuration
@@ -100,6 +101,12 @@ fn generate_profile_with_mode<N: NetworkPolicy>(
             NetworkMode::Allow => "allow".to_string(),
             NetworkMode::Proxy => "proxy".to_string(),
         },
+        security_deny_rules: config
+            .security()
+            .sbpl_deny_rules()
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
     };
 
     let profile = template.render().map_err(|e| {

@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{SandboxError, SandboxResult};
 use crate::network::{DenyAll, NetworkPolicy};
+use crate::security::SecurityConfig;
 
 /// Resource limits for sandboxed processes
 #[derive(Debug, Clone, Default)]
@@ -215,6 +216,7 @@ impl PythonConfigBuilder {
 #[derive(Debug)]
 pub struct SandboxConfig<N: NetworkPolicy = DenyAll> {
     network: N,
+    security: SecurityConfig,
     writable_paths: Vec<PathBuf>,
     readable_paths: Vec<PathBuf>,
     executable_paths: Vec<PathBuf>,
@@ -228,6 +230,7 @@ impl Default for SandboxConfig<DenyAll> {
     fn default() -> Self {
         Self {
             network: DenyAll,
+            security: SecurityConfig::default(),
             writable_paths: Vec::new(),
             readable_paths: Vec::new(),
             executable_paths: Vec::new(),
@@ -247,6 +250,10 @@ impl<N: NetworkPolicy> SandboxConfig<N> {
 
     pub fn network(&self) -> &N {
         &self.network
+    }
+
+    pub fn security(&self) -> &SecurityConfig {
+        &self.security
     }
 
     pub fn writable_paths(&self) -> &[PathBuf] {
@@ -282,6 +289,7 @@ impl<N: NetworkPolicy> SandboxConfig<N> {
 #[derive(Debug)]
 pub struct SandboxConfigBuilder<N: NetworkPolicy = DenyAll> {
     network: N,
+    security: SecurityConfig,
     writable_paths: Vec<PathBuf>,
     readable_paths: Vec<PathBuf>,
     executable_paths: Vec<PathBuf>,
@@ -295,6 +303,7 @@ impl Default for SandboxConfigBuilder<DenyAll> {
     fn default() -> Self {
         Self {
             network: DenyAll,
+            security: SecurityConfig::default(),
             writable_paths: Vec::new(),
             readable_paths: Vec::new(),
             executable_paths: Vec::new(),
@@ -311,6 +320,7 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
     pub fn network<M: NetworkPolicy>(self, policy: M) -> SandboxConfigBuilder<M> {
         SandboxConfigBuilder {
             network: policy,
+            security: self.security,
             writable_paths: self.writable_paths,
             readable_paths: self.readable_paths,
             executable_paths: self.executable_paths,
@@ -319,6 +329,12 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
             env_passthrough: self.env_passthrough,
             limits: self.limits,
         }
+    }
+
+    /// Set the security configuration
+    pub fn security(mut self, security: SecurityConfig) -> Self {
+        self.security = security;
+        self
     }
 
     pub fn writable_path(mut self, path: impl AsRef<Path>) -> Self {
@@ -388,6 +404,7 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
 
         Ok(SandboxConfig {
             network: self.network,
+            security: self.security,
             writable_paths: self.writable_paths,
             readable_paths: self.readable_paths,
             executable_paths: self.executable_paths,

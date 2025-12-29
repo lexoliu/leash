@@ -16,35 +16,16 @@
 ; Allow file metadata reads (needed for symlink resolution, os.path.exists, etc.)
 (allow file-read-metadata)
 
-; File read access - allow broadly but deny sensitive paths
+; File read access - allow broadly but deny sensitive paths below
 (allow file-read*)
 
 ; Explicit dyld loader access (required on modern macOS)
 (allow file-read* (literal "/usr/lib/dyld"))
 
-; DENY sensitive user data (applied after allow, so these take precedence)
-; SSH keys and credentials
-(deny file-read* (subpath "/Users") (with no-log))
-(deny file-read* (regex #"\.ssh") (with no-log))
-(deny file-read* (regex #"\.gnupg") (with no-log))
-(deny file-read* (regex #"\.aws") (with no-log))
-(deny file-read* (regex #"\.kube") (with no-log))
-(deny file-read* (regex #"\.docker") (with no-log))
-
-; Browser data
-(deny file-read* (regex #"Library/Application Support/Google/Chrome") (with no-log))
-(deny file-read* (regex #"Library/Application Support/Firefox") (with no-log))
-(deny file-read* (regex #"Library/Safari") (with no-log))
-(deny file-read* (regex #"Library/Cookies") (with no-log))
-
-; Keychains
-(deny file-read* (regex #"Library/Keychains") (with no-log))
-
-; Shell history and configs
-(deny file-read* (regex #"\.(bash|zsh|fish)_history") (with no-log))
-(deny file-read* (regex #"\.netrc") (with no-log))
-(deny file-read* (regex #"\.npmrc") (with no-log))
-(deny file-read* (regex #"\.pypirc") (with no-log))
+; Security rules from SecurityConfig
+{% for rule in security_deny_rules %}
+{{ rule }}
+{% endfor %}
 
 ; Temp directories (full read + write including create/unlink)
 (allow file-read* (subpath "/private/tmp"))

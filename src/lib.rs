@@ -65,6 +65,7 @@ mod network;
 mod platform;
 mod python;
 mod sandbox;
+mod security;
 
 // Re-export public types
 pub use command::{Command, StdioConfig};
@@ -81,3 +82,4 @@ pub use network::{
 pub use platform::Child;
 pub use python::VenvManager;
 pub use sandbox::Sandbox;
+pub use security::{SecurityConfig, SecurityConfigBuilder};
