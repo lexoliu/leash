@@ -1,0 +1,434 @@
+use std::path::{Path, PathBuf};
+
+use crate::error::{SandboxError, SandboxResult};
+use crate::network::{DenyAll, NetworkPolicy};
+
+/// Resource limits for sandboxed processes
+#[derive(Debug, Clone, Default)]
+pub struct ResourceLimits {
+    max_memory_bytes: Option<u64>,
+    max_cpu_time_secs: Option<u64>,
+    max_file_size_bytes: Option<u64>,
+    max_processes: Option<u32>,
+}
+
+impl ResourceLimits {
+    /// Create a new builder for resource limits
+    pub fn builder() -> ResourceLimitsBuilder {
+        ResourceLimitsBuilder::default()
+    }
+
+    pub fn max_memory_bytes(&self) -> Option<u64> {
+        self.max_memory_bytes
+    }
+
+    pub fn max_cpu_time_secs(&self) -> Option<u64> {
+        self.max_cpu_time_secs
+    }
+
+    pub fn max_file_size_bytes(&self) -> Option<u64> {
+        self.max_file_size_bytes
+    }
+
+    pub fn max_processes(&self) -> Option<u32> {
+        self.max_processes
+    }
+}
+
+/// Builder for ResourceLimits
+#[derive(Debug, Default)]
+pub struct ResourceLimitsBuilder {
+    inner: ResourceLimits,
+}
+
+impl ResourceLimitsBuilder {
+    pub fn max_memory_bytes(mut self, bytes: u64) -> Self {
+        self.inner.max_memory_bytes = Some(bytes);
+        self
+    }
+
+    pub fn max_cpu_time_secs(mut self, secs: u64) -> Self {
+        self.inner.max_cpu_time_secs = Some(secs);
+        self
+    }
+
+    pub fn max_file_size_bytes(mut self, bytes: u64) -> Self {
+        self.inner.max_file_size_bytes = Some(bytes);
+        self
+    }
+
+    pub fn max_processes(mut self, count: u32) -> Self {
+        self.inner.max_processes = Some(count);
+        self
+    }
+
+    pub fn build(self) -> ResourceLimits {
+        self.inner
+    }
+}
+
+/// Configuration for Python virtual environment
+#[derive(Debug, Clone)]
+pub struct VenvConfig {
+    path: PathBuf,
+    python: Option<PathBuf>,
+    packages: Vec<String>,
+    system_site_packages: bool,
+    use_uv: bool,
+}
+
+impl Default for VenvConfig {
+    fn default() -> Self {
+        Self {
+            path: PathBuf::from(".sandbox-venv"),
+            python: None,
+            packages: Vec::new(),
+            system_site_packages: true,
+            use_uv: true,
+        }
+    }
+}
+
+impl VenvConfig {
+    /// Create a new builder for VenvConfig
+    pub fn builder() -> VenvConfigBuilder {
+        VenvConfigBuilder::default()
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn python(&self) -> Option<&Path> {
+        self.python.as_deref()
+    }
+
+    pub fn packages(&self) -> &[String] {
+        &self.packages
+    }
+
+    pub fn system_site_packages(&self) -> bool {
+        self.system_site_packages
+    }
+
+    pub fn use_uv(&self) -> bool {
+        self.use_uv
+    }
+}
+
+/// Builder for VenvConfig
+#[derive(Debug, Default)]
+pub struct VenvConfigBuilder {
+    inner: VenvConfig,
+}
+
+impl VenvConfigBuilder {
+    pub fn path(mut self, path: impl AsRef<Path>) -> Self {
+        self.inner.path = path.as_ref().to_path_buf();
+        self
+    }
+
+    pub fn python(mut self, python: impl AsRef<Path>) -> Self {
+        self.inner.python = Some(python.as_ref().to_path_buf());
+        self
+    }
+
+    pub fn package(mut self, pkg: impl Into<String>) -> Self {
+        self.inner.packages.push(pkg.into());
+        self
+    }
+
+    pub fn packages(mut self, pkgs: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.inner.packages.extend(pkgs.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn system_site_packages(mut self, enabled: bool) -> Self {
+        self.inner.system_site_packages = enabled;
+        self
+    }
+
+    pub fn use_uv(mut self, enabled: bool) -> Self {
+        self.inner.use_uv = enabled;
+        self
+    }
+
+    pub fn build(self) -> VenvConfig {
+        self.inner
+    }
+}
+
+/// Python sandbox configuration
+#[derive(Debug, Clone)]
+pub struct PythonConfig {
+    venv: VenvConfig,
+    allow_pip_install: bool,
+}
+
+impl Default for PythonConfig {
+    fn default() -> Self {
+        Self {
+            venv: VenvConfig::default(),
+            allow_pip_install: true,
+        }
+    }
+}
+
+impl PythonConfig {
+    /// Create a new builder for PythonConfig
+    pub fn builder() -> PythonConfigBuilder {
+        PythonConfigBuilder::default()
+    }
+
+    pub fn venv(&self) -> &VenvConfig {
+        &self.venv
+    }
+
+    pub fn allow_pip_install(&self) -> bool {
+        self.allow_pip_install
+    }
+}
+
+/// Builder for PythonConfig
+#[derive(Debug, Default)]
+pub struct PythonConfigBuilder {
+    inner: PythonConfig,
+}
+
+impl PythonConfigBuilder {
+    pub fn venv(mut self, config: VenvConfig) -> Self {
+        self.inner.venv = config;
+        self
+    }
+
+    pub fn allow_pip_install(mut self, enabled: bool) -> Self {
+        self.inner.allow_pip_install = enabled;
+        self
+    }
+
+    pub fn build(self) -> PythonConfig {
+        self.inner
+    }
+}
+
+/// Main sandbox configuration
+#[derive(Debug)]
+pub struct SandboxConfig<N: NetworkPolicy = DenyAll> {
+    network: N,
+    writable_paths: Vec<PathBuf>,
+    readable_paths: Vec<PathBuf>,
+    executable_paths: Vec<PathBuf>,
+    python: Option<PythonConfig>,
+    working_dir: PathBuf,
+    env_passthrough: Vec<String>,
+    limits: ResourceLimits,
+}
+
+impl Default for SandboxConfig<DenyAll> {
+    fn default() -> Self {
+        Self {
+            network: DenyAll,
+            writable_paths: Vec::new(),
+            readable_paths: Vec::new(),
+            executable_paths: Vec::new(),
+            python: None,
+            working_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            env_passthrough: Vec::new(),
+            limits: ResourceLimits::default(),
+        }
+    }
+}
+
+impl<N: NetworkPolicy> SandboxConfig<N> {
+    /// Create a new builder for SandboxConfig
+    pub fn builder() -> SandboxConfigBuilder<DenyAll> {
+        SandboxConfigBuilder::default()
+    }
+
+    pub fn network(&self) -> &N {
+        &self.network
+    }
+
+    pub fn writable_paths(&self) -> &[PathBuf] {
+        &self.writable_paths
+    }
+
+    pub fn readable_paths(&self) -> &[PathBuf] {
+        &self.readable_paths
+    }
+
+    pub fn executable_paths(&self) -> &[PathBuf] {
+        &self.executable_paths
+    }
+
+    pub fn python(&self) -> Option<&PythonConfig> {
+        self.python.as_ref()
+    }
+
+    pub fn working_dir(&self) -> &Path {
+        &self.working_dir
+    }
+
+    pub fn env_passthrough(&self) -> &[String] {
+        &self.env_passthrough
+    }
+
+    pub fn limits(&self) -> &ResourceLimits {
+        &self.limits
+    }
+}
+
+/// Builder for SandboxConfig
+#[derive(Debug)]
+pub struct SandboxConfigBuilder<N: NetworkPolicy = DenyAll> {
+    network: N,
+    writable_paths: Vec<PathBuf>,
+    readable_paths: Vec<PathBuf>,
+    executable_paths: Vec<PathBuf>,
+    python: Option<PythonConfig>,
+    working_dir: PathBuf,
+    env_passthrough: Vec<String>,
+    limits: ResourceLimits,
+}
+
+impl Default for SandboxConfigBuilder<DenyAll> {
+    fn default() -> Self {
+        Self {
+            network: DenyAll,
+            writable_paths: Vec::new(),
+            readable_paths: Vec::new(),
+            executable_paths: Vec::new(),
+            python: None,
+            working_dir: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+            env_passthrough: Vec::new(),
+            limits: ResourceLimits::default(),
+        }
+    }
+}
+
+impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
+    /// Set the network policy (changes the generic type)
+    pub fn network<M: NetworkPolicy>(self, policy: M) -> SandboxConfigBuilder<M> {
+        SandboxConfigBuilder {
+            network: policy,
+            writable_paths: self.writable_paths,
+            readable_paths: self.readable_paths,
+            executable_paths: self.executable_paths,
+            python: self.python,
+            working_dir: self.working_dir,
+            env_passthrough: self.env_passthrough,
+            limits: self.limits,
+        }
+    }
+
+    pub fn writable_path(mut self, path: impl AsRef<Path>) -> Self {
+        self.writable_paths.push(path.as_ref().to_path_buf());
+        self
+    }
+
+    pub fn writable_paths(mut self, paths: impl IntoIterator<Item = impl AsRef<Path>>) -> Self {
+        self.writable_paths
+            .extend(paths.into_iter().map(|p| p.as_ref().to_path_buf()));
+        self
+    }
+
+    pub fn readable_path(mut self, path: impl AsRef<Path>) -> Self {
+        self.readable_paths.push(path.as_ref().to_path_buf());
+        self
+    }
+
+    pub fn readable_paths(mut self, paths: impl IntoIterator<Item = impl AsRef<Path>>) -> Self {
+        self.readable_paths
+            .extend(paths.into_iter().map(|p| p.as_ref().to_path_buf()));
+        self
+    }
+
+    pub fn executable_path(mut self, path: impl AsRef<Path>) -> Self {
+        self.executable_paths.push(path.as_ref().to_path_buf());
+        self
+    }
+
+    pub fn executable_paths(mut self, paths: impl IntoIterator<Item = impl AsRef<Path>>) -> Self {
+        self.executable_paths
+            .extend(paths.into_iter().map(|p| p.as_ref().to_path_buf()));
+        self
+    }
+
+    pub fn python(mut self, config: PythonConfig) -> Self {
+        self.python = Some(config);
+        self
+    }
+
+    pub fn working_dir(mut self, path: impl AsRef<Path>) -> Self {
+        self.working_dir = path.as_ref().to_path_buf();
+        self
+    }
+
+    pub fn env_passthrough(mut self, var: impl Into<String>) -> Self {
+        self.env_passthrough.push(var.into());
+        self
+    }
+
+    pub fn env_passthroughs(mut self, vars: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.env_passthrough
+            .extend(vars.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn limits(mut self, limits: ResourceLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+
+    pub fn build(self) -> SandboxResult<SandboxConfig<N>> {
+        // Validate working directory exists
+        if !self.working_dir.exists() {
+            return Err(SandboxError::PathNotFound(self.working_dir));
+        }
+
+        Ok(SandboxConfig {
+            network: self.network,
+            writable_paths: self.writable_paths,
+            readable_paths: self.readable_paths,
+            executable_paths: self.executable_paths,
+            python: self.python,
+            working_dir: self.working_dir,
+            env_passthrough: self.env_passthrough,
+            limits: self.limits,
+        })
+    }
+}
+
+/// Create a strict sandbox config with no network and minimal access
+pub fn strict_preset() -> SandboxConfig<DenyAll> {
+    SandboxConfig::default()
+}
+
+/// Create a sandbox config for Python development with pip install capability
+pub fn python_dev_preset() -> SandboxConfig<DenyAll> {
+    SandboxConfigBuilder::default()
+        .python(PythonConfig::builder().allow_pip_install(true).build())
+        .build()
+        .expect("python_dev_preset should always be valid")
+}
+
+/// Create a sandbox config for Python data science with common tools
+pub fn python_data_science_preset() -> SandboxConfig<DenyAll> {
+    SandboxConfigBuilder::default()
+        .python(
+            PythonConfig::builder()
+                .venv(
+                    VenvConfig::builder()
+                        .packages(["numpy", "pandas", "matplotlib", "scikit-learn"])
+                        .system_site_packages(true)
+                        .build(),
+                )
+                .allow_pip_install(true)
+                .build(),
+        )
+        .executable_path("/usr/bin/ffmpeg")
+        .executable_path("/usr/local/bin/ffmpeg")
+        .readable_path("/usr/share")
+        .build()
+        .expect("python_data_science_preset should always be valid")
+}

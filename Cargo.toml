@@ -1,0 +1,47 @@
+[package]
+name = "native-sandbox"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "Cross-platform native sandboxing library for running untrusted code"
+keywords = ["sandbox", "security", "isolation", "python", "venv"]
+categories = ["os", "development-tools"]
+
+[features]
+default = ["python"]
+python = ["which"]
+
+[dependencies]
+# Error handling
+thiserror = "2"
+
+# Temporary files
+tempfile = "3"
+
+# Logging
+tracing = "0.1"
+
+# Python executable detection (optional)
+[dependencies.which]
+version = "7"
+optional = true
+
+# Linux-specific dependencies
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4"
+seccompiler = "0.4"
+nix = { version = "0.29", features = ["process"] }
+
+# Windows-specific dependencies
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_Security_Isolation",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_Foundation",
+] }
+
+[dev-dependencies]
+futures-lite = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tracing-subscriber = "0.3"
