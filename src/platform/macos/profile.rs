@@ -30,6 +30,9 @@ struct SandboxProfile {
     python_venv_path: Option<String>,
     network_mode: String,
     security_deny_rules: Vec<String>,
+    allow_gpu: bool,
+    allow_npu: bool,
+    allow_hardware: bool,
 }
 
 /// Generate an SBPL profile from sandbox configuration
@@ -77,6 +80,17 @@ fn generate_profile_with_mode<N: NetworkPolicy>(
         NetworkMode::Proxy => tracing::debug!("sandbox: allow network to localhost proxy"),
     }
 
+    let security = config.security();
+    if security.allow_gpu {
+        tracing::debug!("sandbox: allow GPU access");
+    }
+    if security.allow_npu {
+        tracing::debug!("sandbox: allow NPU access");
+    }
+    if security.allow_hardware {
+        tracing::debug!("sandbox: allow general hardware access");
+    }
+
     // Prepare template data
     let template = SandboxProfile {
         readable_paths: config
@@ -101,12 +115,14 @@ fn generate_profile_with_mode<N: NetworkPolicy>(
             NetworkMode::Allow => "allow".to_string(),
             NetworkMode::Proxy => "proxy".to_string(),
         },
-        security_deny_rules: config
-            .security()
+        security_deny_rules: security
             .sbpl_deny_rules()
             .iter()
             .map(|s| s.to_string())
             .collect(),
+        allow_gpu: security.allow_gpu,
+        allow_npu: security.allow_npu,
+        allow_hardware: security.allow_hardware,
     };
 
     let profile = template.render().map_err(|e| {

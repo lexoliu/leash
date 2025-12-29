@@ -1,10 +1,28 @@
 (version 1)
 (deny default)
 
-; System basics - Mach IPC, sysctl, IOKit
+; System basics - Mach IPC, sysctl
 (allow mach*)
 (allow sysctl-read)
+
+; Hardware access configuration
+{% if allow_gpu %}
+; GPU access - Metal, OpenGL, OpenCL
+(allow iokit-open (iokit-user-client-class "IOAccelerator"))
+(allow iokit-open (iokit-user-client-class "IOAccelerationUserClient"))
+(allow iokit-open (iokit-user-client-class "AGXDeviceUserClient"))
+(allow iokit-open (iokit-user-client-class "IOSurfaceRootUserClient"))
+(allow iokit-open (iokit-user-client-class "IOSurfaceSendRight"))
+{% endif %}
+{% if allow_npu %}
+; NPU/Neural Engine access - CoreML, ANE (Apple Neural Engine)
+(allow iokit-open (iokit-user-client-class "H11ANEInDirectPathClient"))
+(allow iokit-open (iokit-user-client-class "AppleNeuralEngineUserClient"))
+{% endif %}
+{% if allow_hardware %}
+; General hardware access - USB, Bluetooth, cameras, etc.
 (allow iokit-open)
+{% endif %}
 
 ; Process operations
 (allow process-fork)

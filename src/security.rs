@@ -37,6 +37,15 @@ pub struct SecurityConfig {
     pub protect_shell_history: bool,
     /// Protect package manager credentials (.npmrc, .pypirc, .netrc)
     pub protect_package_credentials: bool,
+    /// Allow GPU access (Metal, CUDA, OpenCL, etc.)
+    /// Enabled by default - essential for graphics and compute workloads
+    pub allow_gpu: bool,
+    /// Allow NPU/Neural Engine access (CoreML, ANE on Apple Silicon)
+    /// Enabled by default - essential for ML/AI workloads
+    pub allow_npu: bool,
+    /// Allow general hardware access (USB, Bluetooth, cameras, etc.)
+    /// Disabled by default in strict mode
+    pub allow_hardware: bool,
 }
 
 impl Default for SecurityConfig {
@@ -49,6 +58,8 @@ impl SecurityConfig {
     /// Strict preset - maximum protection (default)
     ///
     /// All sensitive data protection is enabled.
+    /// GPU and NPU access allowed (essential for ML workloads).
+    /// General hardware access is disabled.
     pub fn strict() -> Self {
         Self {
             protect_user_home: true,
@@ -58,6 +69,9 @@ impl SecurityConfig {
             protect_keychain: true,
             protect_shell_history: true,
             protect_package_credentials: true,
+            allow_gpu: true,
+            allow_npu: true,
+            allow_hardware: false,
         }
     }
 
@@ -65,6 +79,7 @@ impl SecurityConfig {
     ///
     /// Use when you fully trust the sandboxed code.
     /// Logging still works for audit purposes.
+    /// All hardware access is allowed.
     pub fn permissive() -> Self {
         Self {
             protect_user_home: false,
@@ -74,6 +89,9 @@ impl SecurityConfig {
             protect_keychain: false,
             protect_shell_history: false,
             protect_package_credentials: false,
+            allow_gpu: true,
+            allow_npu: true,
+            allow_hardware: true,
         }
     }
 
@@ -191,6 +209,24 @@ impl SecurityConfigBuilder {
     /// Protect package manager credentials
     pub fn protect_package_credentials(mut self, enabled: bool) -> Self {
         self.config.protect_package_credentials = enabled;
+        self
+    }
+
+    /// Allow GPU access (Metal, CUDA, OpenCL)
+    pub fn allow_gpu(mut self, enabled: bool) -> Self {
+        self.config.allow_gpu = enabled;
+        self
+    }
+
+    /// Allow NPU/Neural Engine access (CoreML, ANE)
+    pub fn allow_npu(mut self, enabled: bool) -> Self {
+        self.config.allow_npu = enabled;
+        self
+    }
+
+    /// Allow general hardware access (USB, Bluetooth, cameras, etc.)
+    pub fn allow_hardware(mut self, enabled: bool) -> Self {
+        self.config.allow_hardware = enabled;
         self
     }
 
