@@ -36,6 +36,9 @@ pub enum SandboxError {
     #[error("python not found on system")]
     PythonNotFound,
 
+    #[error("python venv not found at: {0}")]
+    VenvNotFound(PathBuf),
+
     #[error("python venv creation failed: {0}")]
     VenvCreationFailed(String),
 

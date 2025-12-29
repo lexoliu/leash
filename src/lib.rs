@@ -63,6 +63,7 @@ mod config;
 mod error;
 mod network;
 mod platform;
+mod python;
 mod sandbox;
 
 // Re-export public types
@@ -77,4 +78,5 @@ pub use network::{
     AllowAll, AllowList, ConnectionDirection, CustomPolicy, DenyAll, DomainRequest, NetworkPolicy,
 };
 pub use platform::Child;
+pub use python::VenvManager;
 pub use sandbox::Sandbox;
