@@ -2,6 +2,8 @@ use std::io;
 use std::path::PathBuf;
 use thiserror::Error;
 
+use crate::ipc::IpcError;
+
 /// Result type for sandbox operations
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -62,4 +64,7 @@ pub enum Error {
 
     #[error("I/O error: {0}")]
     IoError(String),
+
+    #[error("IPC error: {0}")]
+    IpcError(#[from] IpcError),
 }

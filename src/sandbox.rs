@@ -8,6 +8,7 @@ use executor_core::{try_init_global_executor, DefaultExecutor, Executor};
 use crate::command::Command;
 use crate::config::{SandboxConfig, SandboxConfigData};
 use crate::error::Result;
+use crate::ipc::IpcServer;
 use crate::network::{DenyAll, NetworkPolicy, NetworkProxy};
 use crate::platform;
 
@@ -78,12 +79,14 @@ impl ProcessTracker {
 ///
 /// When dropped, the sandbox will:
 /// - Stop the network proxy
+/// - Stop the IPC server (if enabled)
 /// - Kill all child processes that were spawned within it
 /// - Delete the working directory (unless `keep_working_dir()` was called)
 pub struct Sandbox<N: NetworkPolicy = DenyAll> {
     config_data: SandboxConfigData,
     backend: NativeBackend,
     proxy: NetworkProxy<N>,
+    ipc_server: Option<IpcServer>,
     process_tracker: ProcessTracker,
     working_dir_path: PathBuf,
     keep_working_dir: bool,
@@ -98,10 +101,8 @@ impl Sandbox<DenyAll> {
     ///
     /// By default, all network access is denied (DenyAll policy).
     pub async fn new() -> Result<Self> {
-        let config = SandboxConfig::new()?;
-        // Initialize global executor with AsyncExecutor if not already set
         let _ = try_init_global_executor(AsyncExecutor::new());
-        Self::create_internal(config, DefaultExecutor).await
+        Self::with_config_and_executor(SandboxConfig::new()?, DefaultExecutor).await
     }
 
     /// Create a new sandbox with a custom executor
@@ -109,8 +110,7 @@ impl Sandbox<DenyAll> {
     /// Use this when you want to integrate with a specific async runtime
     /// (e.g., tokio, async-std) instead of the default executor.
     pub async fn with_executor<E: Executor + Clone + 'static>(executor: E) -> Result<Self> {
-        let config = SandboxConfig::new()?;
-        Self::create_internal(config, executor).await
+        Self::with_config_and_executor(SandboxConfig::new()?, executor).await
     }
 }
 
@@ -119,9 +119,8 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
     ///
     /// Uses the global executor from executor-core (initialized with AsyncExecutor if not set).
     pub async fn with_config(config: SandboxConfig<N>) -> Result<Self> {
-        // Initialize global executor with AsyncExecutor if not already set
         let _ = try_init_global_executor(AsyncExecutor::new());
-        Self::create_internal(config, DefaultExecutor).await
+        Self::with_config_and_executor(config, DefaultExecutor).await
     }
 
     /// Create a sandbox with custom configuration and executor
@@ -132,22 +131,24 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
         config: SandboxConfig<N>,
         executor: E,
     ) -> Result<Self> {
-        Self::create_internal(config, executor).await
-    }
-
-    /// Internal creation method
-    async fn create_internal<E: Executor + Clone + 'static>(
-        config: SandboxConfig<N>,
-        executor: E,
-    ) -> Result<Self> {
         let backend = platform::create_native_backend()?;
 
         // Extract the network policy for the proxy
-        let (policy, config_data) = config.into_parts();
+        let (policy, mut config_data) = config.into_parts();
         let working_dir_path = config_data.working_dir.clone();
 
-        // Create and start the network proxy with the executor
-        let proxy = NetworkProxy::new(policy, executor).await?;
+        // Create and start the network proxy
+        let proxy = NetworkProxy::new(policy, executor.clone()).await?;
+
+        // Start IPC server if configured
+        let ipc_server = if let Some(router) = config_data.ipc.take() {
+            let socket_path = working_dir_path.join(".leash").join("ipc.sock");
+            let server = IpcServer::new(router, &socket_path, executor).await?;
+            tracing::info!(socket_path = %socket_path.display(), "IPC server started");
+            Some(server)
+        } else {
+            None
+        };
 
         tracing::info!(
             proxy_addr = %proxy.addr(),
@@ -159,6 +160,7 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
             config_data,
             backend,
             proxy,
+            ipc_server,
             process_tracker: ProcessTracker::new(),
             working_dir_path,
             keep_working_dir: false,
@@ -189,12 +191,18 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
     ///
     /// The command will automatically have HTTP_PROXY and HTTPS_PROXY
     /// environment variables set to route traffic through the sandbox's proxy.
+    /// If IPC is configured, LEASH_IPC_SOCKET will also be set.
     pub fn command(&self, program: impl Into<String>) -> Command<'_> {
+        let ipc_socket_path = self
+            .ipc_server
+            .as_ref()
+            .map(|s| s.socket_path().to_path_buf());
         Command::new(
             &self.config_data,
             &self.backend,
             &self.process_tracker,
             &self.proxy,
+            ipc_socket_path,
             program,
         )
     }
@@ -240,7 +248,15 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
 
 impl<N: NetworkPolicy> Drop for Sandbox<N> {
     fn drop(&mut self) {
-        // Stop the network proxy first
+        // Stop the IPC server and remove socket file
+        if let Some(ref ipc_server) = self.ipc_server {
+            ipc_server.stop();
+            tracing::debug!("stopped IPC server");
+        }
+        // Drop the IPC server to remove socket file before removing working dir
+        self.ipc_server.take();
+
+        // Stop the network proxy
         self.proxy.stop();
         tracing::debug!("stopped network proxy");
 

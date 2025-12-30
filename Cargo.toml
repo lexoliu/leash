@@ -1,3 +1,6 @@
+[workspace]
+members = [".", "ipc"]
+
 [package]
 name = "leash"
 version = "0.1.0"
@@ -12,6 +15,10 @@ default = ["python"]
 python = ["which"]
 
 [dependencies]
+# Serialization for IPC
+serde = { version = "1", features = ["derive"] }
+rmp-serde = "1"
+
 # Error handling
 thiserror = "2"
 
@@ -69,3 +76,4 @@ windows = { version = "0.58", features = [
 tracing-subscriber = "0.3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 executor-core = { version = "0.7", features = ["tokio"] }
+smol = "2"

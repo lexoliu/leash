@@ -61,6 +61,7 @@
 mod command;
 mod config;
 mod error;
+pub mod ipc;
 mod network;
 mod platform;
 mod python;
@@ -76,6 +77,7 @@ pub use config::{
     python_dev_preset, strict_preset,
 };
 pub use error::{Error, Result};
+pub use ipc::{IpcCommand, IpcError, IpcRouter};
 pub use network::{
     AllowAll, AllowList, ConnectionDirection, CustomPolicy, DenyAll, DomainRequest, NetworkPolicy,
 };

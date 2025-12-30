@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
+use crate::ipc::IpcRouter;
 use crate::network::{DenyAll, NetworkPolicy};
 use crate::security::SecurityConfig;
 use crate::workdir::WorkingDir;
@@ -217,7 +218,6 @@ impl PythonConfigBuilder {
 ///
 /// This is used internally after the network policy has been extracted
 /// for the NetworkProxy.
-#[derive(Debug)]
 pub struct SandboxConfigData {
     pub(crate) security: SecurityConfig,
     pub(crate) writable_paths: Vec<PathBuf>,
@@ -227,6 +227,7 @@ pub struct SandboxConfigData {
     pub(crate) working_dir: PathBuf,
     pub(crate) env_passthrough: Vec<String>,
     pub(crate) limits: ResourceLimits,
+    pub(crate) ipc: Option<IpcRouter>,
 }
 
 impl SandboxConfigData {
@@ -261,10 +262,13 @@ impl SandboxConfigData {
     pub fn limits(&self) -> &ResourceLimits {
         &self.limits
     }
+
+    pub fn ipc(&self) -> Option<&IpcRouter> {
+        self.ipc.as_ref()
+    }
 }
 
 /// Main sandbox configuration
-#[derive(Debug)]
 pub struct SandboxConfig<N: NetworkPolicy = DenyAll> {
     network: N,
     security: SecurityConfig,
@@ -275,6 +279,7 @@ pub struct SandboxConfig<N: NetworkPolicy = DenyAll> {
     working_dir: PathBuf,
     env_passthrough: Vec<String>,
     limits: ResourceLimits,
+    ipc: Option<IpcRouter>,
 }
 
 impl SandboxConfig<DenyAll> {
@@ -308,6 +313,7 @@ impl<N: NetworkPolicy> SandboxConfig<N> {
                 working_dir: self.working_dir,
                 env_passthrough: self.env_passthrough,
                 limits: self.limits,
+                ipc: self.ipc,
             },
         )
     }
@@ -347,10 +353,13 @@ impl<N: NetworkPolicy> SandboxConfig<N> {
     pub fn limits(&self) -> &ResourceLimits {
         &self.limits
     }
+
+    pub fn ipc(&self) -> Option<&IpcRouter> {
+        self.ipc.as_ref()
+    }
 }
 
 /// Builder for SandboxConfig
-#[derive(Debug)]
 pub struct SandboxConfigBuilder<N: NetworkPolicy = DenyAll> {
     network: N,
     security: SecurityConfig,
@@ -361,6 +370,7 @@ pub struct SandboxConfigBuilder<N: NetworkPolicy = DenyAll> {
     working_dir: Option<PathBuf>,
     env_passthrough: Vec<String>,
     limits: ResourceLimits,
+    ipc: Option<IpcRouter>,
 }
 
 impl Default for SandboxConfigBuilder<DenyAll> {
@@ -375,6 +385,7 @@ impl Default for SandboxConfigBuilder<DenyAll> {
             working_dir: None, // Will generate random name on build()
             env_passthrough: Vec::new(),
             limits: ResourceLimits::default(),
+            ipc: None,
         }
     }
 }
@@ -392,6 +403,7 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
             working_dir: self.working_dir,
             env_passthrough: self.env_passthrough,
             limits: self.limits,
+            ipc: self.ipc,
         }
     }
 
@@ -464,6 +476,12 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
         self
     }
 
+    /// Set the IPC router for handling commands from sandboxed processes
+    pub fn ipc(mut self, router: IpcRouter) -> Self {
+        self.ipc = Some(router);
+        self
+    }
+
     pub fn build(self) -> Result<SandboxConfig<N>> {
         // Resolve working directory: use specified path or create random one
         let working_dir = match self.working_dir {
@@ -499,6 +517,7 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
             working_dir,
             env_passthrough: self.env_passthrough,
             limits: self.limits,
+            ipc: self.ipc,
         })
     }
 }

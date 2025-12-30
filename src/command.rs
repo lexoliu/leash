@@ -42,12 +42,14 @@ impl From<StdioConfig> for Stdio {
 ///
 /// All network traffic from the command is routed through the sandbox's proxy.
 /// HTTP_PROXY and HTTPS_PROXY environment variables are automatically injected.
+/// If IPC is configured, LEASH_IPC_SOCKET is also injected.
 pub struct Command<'a> {
     config: &'a SandboxConfigData,
     backend: &'a NativeBackend,
     process_tracker: &'a ProcessTracker,
     proxy_url: String,
     proxy_port: u16,
+    ipc_socket_path: Option<PathBuf>,
     program: String,
     args: Vec<String>,
     envs: Vec<(String, String)>,
@@ -64,6 +66,7 @@ impl<'a> Command<'a> {
         backend: &'a NativeBackend,
         process_tracker: &'a ProcessTracker,
         proxy: &NetworkProxy<N>,
+        ipc_socket_path: Option<PathBuf>,
         program: impl Into<String>,
     ) -> Self {
         Self {
@@ -72,6 +75,7 @@ impl<'a> Command<'a> {
             process_tracker,
             proxy_url: proxy.proxy_url(),
             proxy_port: proxy.addr().port(),
+            ipc_socket_path,
             program: program.into(),
             args: Vec::new(),
             envs: Vec::new(),
@@ -155,6 +159,16 @@ impl<'a> Command<'a> {
             // Only add if user hasn't explicitly set it
             if !envs.iter().any(|(k, _)| k == key) {
                 envs.push((key.to_string(), val.clone()));
+            }
+        }
+
+        // Inject IPC socket path if configured
+        if let Some(ref socket_path) = self.ipc_socket_path {
+            if !envs.iter().any(|(k, _)| k == "LEASH_IPC_SOCKET") {
+                envs.push((
+                    "LEASH_IPC_SOCKET".to_string(),
+                    socket_path.to_string_lossy().to_string(),
+                ));
             }
         }
 
