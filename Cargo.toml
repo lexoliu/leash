@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "ipc", "cli"]
+members = [".", "ipc", "cli", "nodejs"]
 
 [package]
 name = "leash"

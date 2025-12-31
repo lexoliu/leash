@@ -1,1 +1,6 @@
 /target
+
+# Node.js
+nodejs/node_modules/
+nodejs/*.node
+nodejs/npm-debug.log*
