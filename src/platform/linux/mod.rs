@@ -292,27 +292,10 @@ impl LinuxBackend {
         let mut landlock_opt = Some(landlock_ruleset);
         let mut seccomp_opt = Some(seccomp_filter);
 
-        // DEBUG: Test Landlock only with detailed error output
+        // DEBUG: Skip sandbox entirely - test raw execution
+        let _ = landlock_opt;
         let _ = seccomp_opt;
-
-        unsafe {
-            cmd.pre_exec(move || {
-                use std::io::Write;
-                if let Some(landlock) = landlock_opt.take() {
-                    match landlock.restrict_self() {
-                        Ok(()) => {
-                            let _ = std::io::stderr().write_all(b"Landlock: restrict_self succeeded\n");
-                        }
-                        Err(e) => {
-                            let msg = format!("Landlock error: {}\n", e);
-                            let _ = std::io::stderr().write_all(msg.as_bytes());
-                            return Err(std::io::Error::new(std::io::ErrorKind::Other, e));
-                        }
-                    }
-                }
-                Ok(())
-            });
-        }
+        // No pre_exec hook
 
         Ok(cmd)
     }
@@ -344,6 +327,15 @@ impl Backend for LinuxBackend {
             stdout,
             stderr,
         )?;
+
+        // DEBUG: Print command details before spawn
+        tracing::info!(
+            program = %program,
+            args = ?args,
+            working_dir = ?current_dir.map(|p| p.display()),
+            config_working_dir = %config.working_dir().display(),
+            "About to spawn command"
+        );
 
         let output = cmd.output()?;
 
