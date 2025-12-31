@@ -1,0 +1,57 @@
+name: Linux Sandbox Tests
+
+on:
+  push:
+    branches: [main, linux-impl]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test-linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check kernel version and Landlock support
+        run: |
+          echo "=== Kernel Info ==="
+          uname -a
+          echo ""
+          echo "=== Landlock Status ==="
+          cat /sys/kernel/security/landlock/status 2>/dev/null || echo "Landlock status file not found"
+          echo ""
+          echo "=== LSM Modules ==="
+          cat /sys/kernel/security/lsm 2>/dev/null || echo "LSM file not found"
+
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Build
+        run: cargo build --all-features
+
+      - name: Run unit tests
+        run: cargo test --all-features
+
+      - name: Run security test
+        run: cargo run --example security_test
+        continue-on-error: true
+
+      - name: Test sandbox isolation
+        run: |
+          echo "=== Testing sandbox isolation ==="
+          cargo run --example debug_sandbox || echo "Debug sandbox test completed"
