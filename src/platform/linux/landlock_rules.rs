@@ -61,14 +61,19 @@ pub fn build_ruleset(config: &SandboxConfigData, proxy_port: u16) -> Result<Prep
         .create()
         .map_err(|e| Error::InvalidProfile(format!("Landlock ruleset create error: {}", e)))?;
 
-    // --- System paths (read-only) ---
+    // --- System paths (read + execute for binaries/libraries) ---
+    // These paths need both read and execute for running programs
+    let system_exec_paths = ["/usr", "/lib", "/lib64", "/lib32", "/bin", "/sbin"];
+    let system_exec_access = make_bitflags!(AccessFs::{
+        ReadFile | ReadDir | Execute
+    });
+
+    for path in &system_exec_paths {
+        add_path_rule(&mut ruleset, path, system_exec_access)?;
+    }
+
+    // System config and pseudo-filesystems (read-only, no execute needed)
     let system_read_paths = [
-        "/usr",
-        "/lib",
-        "/lib64",
-        "/lib32",
-        "/bin",
-        "/sbin",
         "/etc",
         "/proc",
         "/sys",
