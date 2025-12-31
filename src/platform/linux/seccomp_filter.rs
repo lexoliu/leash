@@ -205,85 +205,89 @@ fn add_socket_restrictions(
 
 /// Block syscalls that are dangerous for sandboxed processes
 fn add_dangerous_syscall_blocks(rules: &mut BTreeMap<i64, Vec<SeccompRule>>) {
-    // Empty Vec means "always match" -> trigger the on-match action (EPERM)
-    let block_always = vec![];
+    // A rule with no conditions always matches, triggering match_action (EPERM)
+    // Note: empty Vec<SeccompRule> means "no rules" (mismatch_action applies)
+    //       Vec with one SeccompRule containing no conditions = "always match"
+    let block_rule = SeccompRule::new(vec![]).expect("empty rule should always succeed");
+    let block_always = || vec![block_rule.clone()];
 
     // Process debugging and manipulation
-    rules.insert(libc::SYS_ptrace, block_always.clone());
-    rules.insert(libc::SYS_process_vm_readv, block_always.clone());
-    rules.insert(libc::SYS_process_vm_writev, block_always.clone());
+    rules.insert(libc::SYS_ptrace, block_always());
+    rules.insert(libc::SYS_process_vm_readv, block_always());
+    rules.insert(libc::SYS_process_vm_writev, block_always());
 
     // Kernel module operations
-    rules.insert(libc::SYS_init_module, block_always.clone());
-    rules.insert(libc::SYS_finit_module, block_always.clone());
-    rules.insert(libc::SYS_delete_module, block_always.clone());
+    rules.insert(libc::SYS_init_module, block_always());
+    rules.insert(libc::SYS_finit_module, block_always());
+    rules.insert(libc::SYS_delete_module, block_always());
 
     // Personality changes (can disable ASLR, etc.)
-    rules.insert(libc::SYS_personality, block_always.clone());
+    rules.insert(libc::SYS_personality, block_always());
 
     // Mount operations
-    rules.insert(libc::SYS_mount, block_always.clone());
-    rules.insert(libc::SYS_umount2, block_always.clone());
-    rules.insert(libc::SYS_pivot_root, block_always.clone());
+    rules.insert(libc::SYS_mount, block_always());
+    rules.insert(libc::SYS_umount2, block_always());
+    rules.insert(libc::SYS_pivot_root, block_always());
 
     // Namespace operations (could escape sandbox)
-    rules.insert(libc::SYS_unshare, block_always.clone());
-    rules.insert(libc::SYS_setns, block_always.clone());
+    rules.insert(libc::SYS_unshare, block_always());
+    rules.insert(libc::SYS_setns, block_always());
 
     // Reboot and power management
-    rules.insert(libc::SYS_reboot, block_always.clone());
-    rules.insert(libc::SYS_kexec_load, block_always.clone());
-    rules.insert(libc::SYS_kexec_file_load, block_always.clone());
+    rules.insert(libc::SYS_reboot, block_always());
+    rules.insert(libc::SYS_kexec_load, block_always());
+    rules.insert(libc::SYS_kexec_file_load, block_always());
 
     // UID/GID manipulation (privilege escalation)
-    rules.insert(libc::SYS_setuid, block_always.clone());
-    rules.insert(libc::SYS_setgid, block_always.clone());
-    rules.insert(libc::SYS_setreuid, block_always.clone());
-    rules.insert(libc::SYS_setregid, block_always.clone());
-    rules.insert(libc::SYS_setresuid, block_always.clone());
-    rules.insert(libc::SYS_setresgid, block_always.clone());
-    rules.insert(libc::SYS_setgroups, block_always.clone());
+    rules.insert(libc::SYS_setuid, block_always());
+    rules.insert(libc::SYS_setgid, block_always());
+    rules.insert(libc::SYS_setreuid, block_always());
+    rules.insert(libc::SYS_setregid, block_always());
+    rules.insert(libc::SYS_setresuid, block_always());
+    rules.insert(libc::SYS_setresgid, block_always());
+    rules.insert(libc::SYS_setgroups, block_always());
 
     // Keyring operations (credential access)
-    rules.insert(libc::SYS_add_key, block_always.clone());
-    rules.insert(libc::SYS_request_key, block_always.clone());
-    rules.insert(libc::SYS_keyctl, block_always.clone());
+    rules.insert(libc::SYS_add_key, block_always());
+    rules.insert(libc::SYS_request_key, block_always());
+    rules.insert(libc::SYS_keyctl, block_always());
 
     // BPF (could install malicious filters or bypass restrictions)
-    rules.insert(libc::SYS_bpf, block_always.clone());
+    rules.insert(libc::SYS_bpf, block_always());
 
     // Userfaultfd (commonly used in exploits)
-    rules.insert(libc::SYS_userfaultfd, block_always.clone());
+    rules.insert(libc::SYS_userfaultfd, block_always());
 
     // perf_event_open (information disclosure, timing attacks)
-    rules.insert(libc::SYS_perf_event_open, block_always.clone());
+    rules.insert(libc::SYS_perf_event_open, block_always());
 
     // Clock manipulation
-    rules.insert(libc::SYS_settimeofday, block_always.clone());
-    rules.insert(libc::SYS_clock_settime, block_always.clone());
-    rules.insert(libc::SYS_adjtimex, block_always.clone());
+    rules.insert(libc::SYS_settimeofday, block_always());
+    rules.insert(libc::SYS_clock_settime, block_always());
+    rules.insert(libc::SYS_adjtimex, block_always());
 
     // Swap manipulation
-    rules.insert(libc::SYS_swapon, block_always.clone());
-    rules.insert(libc::SYS_swapoff, block_always.clone());
+    rules.insert(libc::SYS_swapon, block_always());
+    rules.insert(libc::SYS_swapoff, block_always());
 
     // Quota manipulation
-    rules.insert(libc::SYS_quotactl, block_always.clone());
+    rules.insert(libc::SYS_quotactl, block_always());
 
     // Accounting
-    rules.insert(libc::SYS_acct, block_always.clone());
+    rules.insert(libc::SYS_acct, block_always());
 
     tracing::debug!("seccomp: dangerous syscall blocks added");
 }
 
 /// Restrict hardware-related syscalls when allow_hardware is false
 fn add_hardware_restrictions(rules: &mut BTreeMap<i64, Vec<SeccompRule>>) {
-    let block_always = vec![];
+    let block_rule = SeccompRule::new(vec![]).expect("empty rule should always succeed");
+    let block_always = || vec![block_rule.clone()];
 
     // io_uring (powerful async I/O, can be used in exploits)
-    rules.insert(libc::SYS_io_uring_setup, block_always.clone());
-    rules.insert(libc::SYS_io_uring_enter, block_always.clone());
-    rules.insert(libc::SYS_io_uring_register, block_always.clone());
+    rules.insert(libc::SYS_io_uring_setup, block_always());
+    rules.insert(libc::SYS_io_uring_enter, block_always());
+    rules.insert(libc::SYS_io_uring_register, block_always());
 
     tracing::debug!("seccomp: hardware restrictions added");
 }
