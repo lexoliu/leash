@@ -288,14 +288,32 @@ impl LinuxBackend {
 
         // CRITICAL: Apply sandbox restrictions after fork, before exec
         // This closure runs in the child process
-        // We use Option + take() because pre_exec requires FnMut but we need to consume the values
-        let mut landlock_opt = Some(landlock_ruleset);
-        let mut seccomp_opt = Some(seccomp_filter);
+        // Don't use pre-built rulesets - build them inside pre_exec to avoid fd inheritance issues
+        let _ = landlock_ruleset;
+        let _ = seccomp_filter;
+        let config_clone = config.clone();
 
-        // DEBUG: Skip sandbox entirely - test raw execution
-        let _ = landlock_opt;
-        let _ = seccomp_opt;
-        // No pre_exec hook
+        unsafe {
+            cmd.pre_exec(move || {
+                // Build and apply Landlock ruleset inside the child process
+                let ruleset = crate::platform::linux::landlock_rules::build_ruleset(&config_clone, proxy_port)
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Landlock build failed: {}", e)))?;
+
+                ruleset
+                    .restrict_self()
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+                // Build and apply Seccomp filter
+                let filter = crate::platform::linux::seccomp_filter::build_filter(config_clone.security())
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Seccomp build failed: {}", e)))?;
+
+                filter
+                    .apply()
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+
+                Ok(())
+            });
+        }
 
         Ok(cmd)
     }
