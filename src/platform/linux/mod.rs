@@ -294,20 +294,35 @@ impl LinuxBackend {
 
         unsafe {
             cmd.pre_exec(move || {
+                // Debug: write to stderr to trace execution
+                use std::io::Write;
+                let _ = std::io::stderr().write_all(b"pre_exec: starting\n");
+                let _ = std::io::stderr().flush();
+
                 // 1. Apply Landlock (filesystem + network restrictions)
                 if let Some(landlock) = landlock_opt.take() {
+                    let _ = std::io::stderr().write_all(b"pre_exec: applying landlock\n");
+                    let _ = std::io::stderr().flush();
                     landlock
                         .restrict_self()
                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                    let _ = std::io::stderr().write_all(b"pre_exec: landlock applied\n");
+                    let _ = std::io::stderr().flush();
                 }
 
                 // 2. Apply Seccomp (syscall filtering) - must be last
                 if let Some(seccomp) = seccomp_opt.take() {
+                    let _ = std::io::stderr().write_all(b"pre_exec: applying seccomp\n");
+                    let _ = std::io::stderr().flush();
                     seccomp
                         .apply()
                         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                    let _ = std::io::stderr().write_all(b"pre_exec: seccomp applied\n");
+                    let _ = std::io::stderr().flush();
                 }
 
+                let _ = std::io::stderr().write_all(b"pre_exec: done\n");
+                let _ = std::io::stderr().flush();
                 Ok(())
             });
         }
