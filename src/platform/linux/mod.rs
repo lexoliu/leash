@@ -292,10 +292,20 @@ impl LinuxBackend {
         let mut landlock_opt = Some(landlock_ruleset);
         let mut seccomp_opt = Some(seccomp_filter);
 
-        // DEBUG: Skip sandbox restrictions entirely to test basic spawn
-        let _ = landlock_opt;
-        let _ = seccomp_opt;
-        // No pre_exec hook - just run the command directly
+        // DEBUG: Test with Landlock only (no Seccomp)
+        let _ = seccomp_opt; // Skip seccomp for now
+
+        unsafe {
+            cmd.pre_exec(move || {
+                // Apply Landlock only
+                if let Some(landlock) = landlock_opt.take() {
+                    landlock
+                        .restrict_self()
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                }
+                Ok(())
+            });
+        }
 
         Ok(cmd)
     }
