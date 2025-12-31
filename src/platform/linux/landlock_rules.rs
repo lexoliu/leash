@@ -179,6 +179,8 @@ fn add_device_rules(
     abi: ABI,
 ) -> Result<()> {
     // Basic device access for stdio and randomness
+    // Note: /dev/stdin, /dev/stdout, /dev/stderr are symlinks to /proc/self/fd/*
+    // and can't be added as Landlock rules. They work via inherited file descriptors.
     let basic_devices = [
         "/dev/null",
         "/dev/zero",
@@ -186,9 +188,6 @@ fn add_device_rules(
         "/dev/random",
         "/dev/urandom",
         "/dev/fd",
-        "/dev/stdin",
-        "/dev/stdout",
-        "/dev/stderr",
         "/dev/tty",
         "/dev/ptmx",
         "/dev/pts",

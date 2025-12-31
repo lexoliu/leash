@@ -38,10 +38,10 @@ pub fn build_filter(security: &SecurityConfig) -> Result<PreparedFilter> {
 
     let filter = SeccompFilter::new(
         rules,
-        // Action when a blocked syscall is attempted
-        SeccompAction::Errno(libc::EPERM as u32),
-        // Default action (allow everything else)
+        // Default action when syscall is NOT in rules map (allow most syscalls)
         SeccompAction::Allow,
+        // Action when a rule matches (block the dangerous syscall)
+        SeccompAction::Errno(libc::EPERM as u32),
         arch,
     )
     .map_err(|e| Error::InvalidProfile(format!("Seccomp filter error: {:?}", e)))?;
