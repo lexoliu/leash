@@ -99,53 +99,6 @@ impl SecurityConfig {
     pub fn builder() -> SecurityConfigBuilder {
         SecurityConfigBuilder::default()
     }
-
-    /// Generate SBPL deny rules based on configuration
-    pub fn sbpl_deny_rules(&self) -> Vec<&'static str> {
-        let mut rules = Vec::new();
-
-        if self.protect_user_home {
-            rules.push(r#"(deny file-read* (subpath "/Users") (with no-log))"#);
-        }
-
-        if self.protect_credentials {
-            rules.push(r#"(deny file-read* (regex #"\.ssh") (with no-log))"#);
-            rules.push(r#"(deny file-read* (regex #"\.gnupg") (with no-log))"#);
-        }
-
-        if self.protect_cloud_config {
-            rules.push(r#"(deny file-read* (regex #"\.aws") (with no-log))"#);
-            rules.push(r#"(deny file-read* (regex #"\.kube") (with no-log))"#);
-            rules.push(r#"(deny file-read* (regex #"\.docker") (with no-log))"#);
-        }
-
-        if self.protect_browser_data {
-            rules.push(
-                r#"(deny file-read* (regex #"Library/Application Support/Google/Chrome") (with no-log))"#,
-            );
-            rules.push(
-                r#"(deny file-read* (regex #"Library/Application Support/Firefox") (with no-log))"#,
-            );
-            rules.push(r#"(deny file-read* (regex #"Library/Safari") (with no-log))"#);
-            rules.push(r#"(deny file-read* (regex #"Library/Cookies") (with no-log))"#);
-        }
-
-        if self.protect_keychain {
-            rules.push(r#"(deny file-read* (regex #"Library/Keychains") (with no-log))"#);
-        }
-
-        if self.protect_shell_history {
-            rules.push(r#"(deny file-read* (regex #"\.(bash|zsh|fish)_history") (with no-log))"#);
-        }
-
-        if self.protect_package_credentials {
-            rules.push(r#"(deny file-read* (regex #"\.netrc") (with no-log))"#);
-            rules.push(r#"(deny file-read* (regex #"\.npmrc") (with no-log))"#);
-            rules.push(r#"(deny file-read* (regex #"\.pypirc") (with no-log))"#);
-        }
-
-        rules
-    }
 }
 
 /// Builder for SecurityConfig
@@ -241,24 +194,35 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_strict_has_all_rules() {
+    fn test_strict_has_all_protections() {
         let config = SecurityConfig::strict();
-        let rules = config.sbpl_deny_rules();
 
-        assert!(rules.iter().any(|r| r.contains("/Users")));
-        assert!(rules.iter().any(|r| r.contains(".ssh")));
-        assert!(rules.iter().any(|r| r.contains(".aws")));
-        assert!(rules.iter().any(|r| r.contains("Chrome")));
-        assert!(rules.iter().any(|r| r.contains("Keychains")));
-        assert!(rules.iter().any(|r| r.contains("history")));
-        assert!(rules.iter().any(|r| r.contains(".npmrc")));
+        assert!(config.protect_user_home);
+        assert!(config.protect_credentials);
+        assert!(config.protect_cloud_config);
+        assert!(config.protect_browser_data);
+        assert!(config.protect_keychain);
+        assert!(config.protect_shell_history);
+        assert!(config.protect_package_credentials);
+        assert!(config.allow_gpu);
+        assert!(config.allow_npu);
+        assert!(!config.allow_hardware);
     }
 
     #[test]
-    fn test_permissive_has_no_rules() {
+    fn test_permissive_has_no_protections() {
         let config = SecurityConfig::permissive();
-        let rules = config.sbpl_deny_rules();
-        assert!(rules.is_empty());
+
+        assert!(!config.protect_user_home);
+        assert!(!config.protect_credentials);
+        assert!(!config.protect_cloud_config);
+        assert!(!config.protect_browser_data);
+        assert!(!config.protect_keychain);
+        assert!(!config.protect_shell_history);
+        assert!(!config.protect_package_credentials);
+        assert!(config.allow_gpu);
+        assert!(config.allow_npu);
+        assert!(config.allow_hardware);
     }
 
     #[test]
@@ -269,14 +233,9 @@ mod tests {
             .protect_browser_data(false)
             .build();
 
-        let rules = config.sbpl_deny_rules();
-
-        // Should have credentials rules
-        assert!(rules.iter().any(|r| r.contains(".ssh")));
-
-        // Should NOT have user home or browser rules
-        assert!(!rules.iter().any(|r| r.contains("/Users")));
-        assert!(!rules.iter().any(|r| r.contains("Chrome")));
+        assert!(!config.protect_user_home);
+        assert!(config.protect_credentials);
+        assert!(!config.protect_browser_data);
     }
 
     #[test]
@@ -285,11 +244,8 @@ mod tests {
             .protect_credentials(true)
             .build();
 
-        let rules = config.sbpl_deny_rules();
-
-        // Only credentials should be protected
-        assert!(rules.iter().any(|r| r.contains(".ssh")));
-        assert!(!rules.iter().any(|r| r.contains("/Users")));
-        assert!(!rules.iter().any(|r| r.contains("Chrome")));
+        assert!(config.protect_credentials);
+        assert!(!config.protect_user_home);
+        assert!(!config.protect_browser_data);
     }
 }

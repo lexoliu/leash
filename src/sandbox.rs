@@ -244,6 +244,36 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
     pub fn working_dir(&self) -> &std::path::Path {
         &self.working_dir_path
     }
+
+    /// Run an interactive command with PTY support
+    ///
+    /// This method spawns the command with a proper pseudo-terminal, enabling
+    /// interactive shell sessions with line editing, job control, and proper
+    /// terminal handling. Use this for `leash shell` or any interactive command.
+    ///
+    /// # Arguments
+    /// * `program` - The program to run
+    /// * `args` - Arguments to pass to the program
+    /// * `envs` - Additional environment variables to set
+    ///
+    /// # Returns
+    /// The exit status of the command
+    #[cfg(target_os = "macos")]
+    pub fn run_interactive(
+        &self,
+        program: &str,
+        args: &[String],
+        envs: &[(String, String)],
+    ) -> Result<crate::pty::PtyExitStatus> {
+        crate::pty::run_with_pty(
+            &self.config_data,
+            &self.proxy,
+            program,
+            args,
+            envs,
+            None,
+        )
+    }
 }
 
 impl<N: NetworkPolicy> Drop for Sandbox<N> {

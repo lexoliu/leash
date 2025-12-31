@@ -64,6 +64,7 @@ mod error;
 pub mod ipc;
 mod network;
 mod platform;
+pub mod pty;
 mod python;
 mod sandbox;
 mod security;
@@ -86,3 +87,7 @@ pub use python::VenvManager;
 pub use sandbox::Sandbox;
 pub use security::{SecurityConfig, SecurityConfigBuilder};
 pub use workdir::WorkingDir;
+
+// PTY support (macOS only for now)
+#[cfg(target_os = "macos")]
+pub use pty::PtyExitStatus;

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**leash** (package name) / **native-sandbox** (repo name) is a cross-platform Rust library for running untrusted code in secure sandboxes with native OS-level isolation. Currently implements macOS via `sandbox-exec` with SBPL profiles; Linux (Landlock + Seccomp) and Windows (AppContainer) are declared but not yet implemented.
+**leash** is a cross-platform Rust library for running untrusted code in secure sandboxes with native OS-level isolation. Currently implements macOS via `sandbox-exec` with SBPL profiles; Linux (Landlock + Seccomp) and Windows (AppContainer) are declared but not yet implemented.
 
 ## Build Commands
 
@@ -69,7 +69,7 @@ src/
 - You are not allowed to revert or restore files or hide problems. If you find a bug, fix it properly rather than working around it.
 - Do not leave legacy code for fallback. If a feature is deprecated, remove all related code.
 - No simplify, no stub, no fallback, no patch.
-- Import third-party crates instead of writing your own implementation. Less code is better.
+- Really important: Import third-party crates instead of writing your own implementation. Less code is better.
 - Async first and runtime agnostic.
 - Be respectful to lints, do not disable lints without strong reason.
 </important>

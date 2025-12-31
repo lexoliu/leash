@@ -16,7 +16,15 @@ struct SandboxProfile {
     executable_paths: Vec<String>,
     working_dir: String,
     python_venv_path: Option<String>,
-    security_deny_rules: Vec<String>,
+    // Security protection flags
+    protect_user_home: bool,
+    protect_credentials: bool,
+    protect_cloud_config: bool,
+    protect_browser_data: bool,
+    protect_keychain: bool,
+    protect_shell_history: bool,
+    protect_package_credentials: bool,
+    // Hardware access flags
     allow_gpu: bool,
     allow_npu: bool,
     allow_hardware: bool,
@@ -84,11 +92,15 @@ pub fn generate_profile(config: &SandboxConfigData, proxy_port: u16) -> Result<S
             .collect(),
         working_dir: escape_path(config.working_dir()),
         python_venv_path: config.python().map(|p| escape_path(p.venv().path())),
-        security_deny_rules: security
-            .sbpl_deny_rules()
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
+        // Security protection flags
+        protect_user_home: security.protect_user_home,
+        protect_credentials: security.protect_credentials,
+        protect_cloud_config: security.protect_cloud_config,
+        protect_browser_data: security.protect_browser_data,
+        protect_keychain: security.protect_keychain,
+        protect_shell_history: security.protect_shell_history,
+        protect_package_credentials: security.protect_package_credentials,
+        // Hardware access flags
         allow_gpu: security.allow_gpu,
         allow_npu: security.allow_npu,
         allow_hardware: security.allow_hardware,

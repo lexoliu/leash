@@ -1,11 +1,19 @@
 (version 1)
 (deny default)
 
-; System basics - Mach IPC, sysctl
-(allow mach*)
+; =============================================================================
+; Mach IPC - Required for process execution
+; =============================================================================
+; Allow mach-lookup for system services (required for process execution)
+; This is more permissive than individual services but needed for compatibility
+(allow mach-lookup)
+
+; Sysctl for system information
 (allow sysctl-read)
 
+; =============================================================================
 ; Hardware access configuration
+; =============================================================================
 {% if allow_gpu %}
 ; GPU access - Metal, OpenGL, OpenCL
 (allow iokit-open (iokit-user-client-class "IOAccelerator"))
@@ -13,47 +21,53 @@
 (allow iokit-open (iokit-user-client-class "AGXDeviceUserClient"))
 (allow iokit-open (iokit-user-client-class "IOSurfaceRootUserClient"))
 (allow iokit-open (iokit-user-client-class "IOSurfaceSendRight"))
+; GPU-related Mach services
+(allow mach-lookup (global-name "com.apple.gpumemd.source"))
+(allow mach-lookup (global-name "com.apple.MTLCompilerService"))
 {% endif %}
 {% if allow_npu %}
 ; NPU/Neural Engine access - CoreML, ANE (Apple Neural Engine)
 (allow iokit-open (iokit-user-client-class "H11ANEInDirectPathClient"))
 (allow iokit-open (iokit-user-client-class "AppleNeuralEngineUserClient"))
+; NPU-related Mach services
+(allow mach-lookup (global-name "com.apple.coreml.modelcompiler"))
+(allow mach-lookup (global-name "com.apple.coreml.mlmodelc"))
 {% endif %}
 {% if allow_hardware %}
 ; General hardware access - USB, Bluetooth, cameras, etc.
 (allow iokit-open)
 {% endif %}
 
+; =============================================================================
 ; Process operations
+; =============================================================================
 (allow process-fork)
 (allow process-exec)
 (allow signal)
 (allow ipc-posix*)
 (allow file-lock)
+(allow process-info-setcontrol)
 
-; Allow file metadata reads (needed for symlink resolution, os.path.exists, etc.)
-(allow file-read-metadata)
-
-; File read access - allow broadly but deny sensitive paths below
+; =============================================================================
+; File system access
+; =============================================================================
+; Allow file reads broadly - macOS has too many interconnected paths to enumerate
+; Sensitive paths are denied below with specific rules
 (allow file-read*)
 
-; Explicit dyld loader access (required on modern macOS)
-(allow file-read* (literal "/usr/lib/dyld"))
-
-; Homebrew packages (read + execute) - subprocesses are also sandboxed
-; Apple Silicon
-(allow file-read* (subpath "/opt/homebrew"))
+; Process execution - restricted to known safe paths
+(allow process-exec (subpath "/bin"))
+(allow process-exec (subpath "/sbin"))
+(allow process-exec (subpath "/usr/bin"))
+(allow process-exec (subpath "/usr/sbin"))
+(allow process-exec (subpath "/usr/libexec"))
 (allow process-exec (subpath "/opt/homebrew"))
-; Intel
-(allow file-read* (subpath "/usr/local"))
 (allow process-exec (subpath "/usr/local"))
+(allow process-exec (subpath "/Applications"))
 
-; Security rules from SecurityConfig
-{% for rule in security_deny_rules %}
-{{ rule }}
-{% endfor %}
-
-; Temp directories (full read + write including create/unlink)
+; =============================================================================
+; Temp directories (full read + write)
+; =============================================================================
 (allow file-read* (subpath "/private/tmp"))
 (allow file-read* (subpath "/tmp"))
 (allow file-read* (subpath "/var/folders"))
@@ -71,23 +85,35 @@
 (allow file-write-unlink (subpath "/var/folders"))
 (allow file-write-unlink (subpath "/private/var/folders"))
 
-; Device access - minimal set for stdio and randomness
+; =============================================================================
+; Device access - minimal set for stdio, randomness, and TTY
+; =============================================================================
 (allow file-read* (literal "/dev/null"))
 (allow file-read* (literal "/dev/zero"))
 (allow file-read* (literal "/dev/random"))
 (allow file-read* (literal "/dev/urandom"))
 (allow file-read* (subpath "/dev/fd"))
 (allow file-read* (literal "/dev/tty"))
+(allow file-read* (regex #"^/dev/ttys[0-9]+$"))
+(allow file-read* (regex #"^/dev/pty[pq][0-9a-f]+$"))
 (allow file-write* (literal "/dev/null"))
 (allow file-write* (literal "/dev/zero"))
 (allow file-write* (subpath "/dev/fd"))
 (allow file-write* (literal "/dev/tty"))
+(allow file-write* (regex #"^/dev/ttys[0-9]+$"))
+(allow file-write* (regex #"^/dev/pty[pq][0-9a-f]+$"))
+(allow file-ioctl (literal "/dev/tty"))
+(allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))
+(allow file-ioctl (regex #"^/dev/pty[pq][0-9a-f]+$"))
 
-; Configured readable paths (override denials)
+; =============================================================================
+; User-configured paths
+; =============================================================================
+; Configured readable paths
 {% for path in readable_paths %}
 (allow file-read* (subpath "{{ path }}"))
 {% endfor %}
-; Configured writable paths (includes all write operations: data, create, unlink, rename)
+; Configured writable paths (includes all write operations)
 {% for path in writable_paths %}
 (allow file-read* (subpath "{{ path }}"))
 (allow file-write* (subpath "{{ path }}"))
@@ -99,14 +125,15 @@
 (allow file-read* (literal "{{ path }}"))
 (allow process-exec (literal "{{ path }}"))
 {% endfor %}
-; Working directory (override denials, full read + write including create/unlink)
+
+; Working directory (full read + write)
 (allow file-read* (subpath "{{ working_dir }}"))
 (allow file-write* (subpath "{{ working_dir }}"))
 (allow file-write-create (subpath "{{ working_dir }}"))
 (allow file-write-unlink (subpath "{{ working_dir }}"))
 
 {% if let Some(venv_path) = python_venv_path %}
-; Python venv (full access for pip install)
+; Python venv (full access)
 (allow file-read* (subpath "{{ venv_path }}"))
 (allow file-write* (subpath "{{ venv_path }}"))
 (allow file-write-create (subpath "{{ venv_path }}"))
@@ -114,7 +141,62 @@
 (allow process-exec (subpath "{{ venv_path }}"))
 {% endif %}
 
+; =============================================================================
 ; Network: only allow connections to the sandbox proxy port
+; =============================================================================
 (deny network*)
 (allow network* (remote ip "localhost:{{ proxy_port }}"))
 (allow network* (local unix-socket))
+
+; =============================================================================
+; Security rules - DENY sensitive paths
+; These use regex to match paths regardless of where they appear
+; =============================================================================
+{% if protect_user_home %}
+; Protect user home directories - specific sensitive subdirectories
+(deny file-read* (regex #"/Users/[^/]+/Documents") (with no-log))
+(deny file-read* (regex #"/Users/[^/]+/Desktop") (with no-log))
+(deny file-read* (regex #"/Users/[^/]+/Downloads") (with no-log))
+(deny file-read* (regex #"/Users/[^/]+/Library") (with no-log))
+(deny file-read* (regex #"/Users/[^/]+/Pictures") (with no-log))
+(deny file-read* (regex #"/Users/[^/]+/Movies") (with no-log))
+(deny file-read* (regex #"/Users/[^/]+/Music") (with no-log))
+{% endif %}
+{% if protect_credentials %}
+; Protect SSH/GPG credentials
+(deny file-read* (regex #"\.ssh") (with no-log))
+(deny file-read* (regex #"\.gnupg") (with no-log))
+{% endif %}
+{% if protect_cloud_config %}
+; Protect cloud provider configurations
+(deny file-read* (regex #"\.aws") (with no-log))
+(deny file-read* (regex #"\.kube") (with no-log))
+(deny file-read* (regex #"\.docker") (with no-log))
+(deny file-read* (regex #"\.gcloud") (with no-log))
+(deny file-read* (regex #"\.azure") (with no-log))
+{% endif %}
+{% if protect_browser_data %}
+; Protect browser data (cookies, history, passwords)
+(deny file-read* (regex #"Library/Application Support/Google/Chrome") (with no-log))
+(deny file-read* (regex #"Library/Application Support/Firefox") (with no-log))
+(deny file-read* (regex #"Library/Application Support/Microsoft Edge") (with no-log))
+(deny file-read* (regex #"Library/Safari") (with no-log))
+(deny file-read* (regex #"Library/Cookies") (with no-log))
+{% endif %}
+{% if protect_keychain %}
+; Protect system keychain
+(deny file-read* (regex #"Library/Keychains") (with no-log))
+{% endif %}
+{% if protect_shell_history %}
+; Protect shell history files
+(deny file-read* (regex #"\.(bash|zsh|fish)_history") (with no-log))
+(deny file-read* (regex #"\.local/share/fish/fish_history") (with no-log))
+{% endif %}
+{% if protect_package_credentials %}
+; Protect package manager credentials
+(deny file-read* (regex #"\.netrc") (with no-log))
+(deny file-read* (regex #"\.npmrc") (with no-log))
+(deny file-read* (regex #"\.pypirc") (with no-log))
+(deny file-read* (regex #"\.cargo/credentials") (with no-log))
+(deny file-read* (regex #"\.gem/credentials") (with no-log))
+{% endif %}

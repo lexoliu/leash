@@ -67,4 +67,7 @@ pub enum Error {
 
     #[error("IPC error: {0}")]
     IpcError(#[from] IpcError),
+
+    #[error("PTY error: {0}")]
+    PtyError(String),
 }

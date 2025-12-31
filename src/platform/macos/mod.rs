@@ -1,5 +1,7 @@
 mod profile;
 
+pub use profile::generate_profile;
+
 use std::process::{Command, Output, Stdio};
 
 use crate::config::SandboxConfigData;

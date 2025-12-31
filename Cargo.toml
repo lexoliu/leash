@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "ipc"]
+members = [".", "ipc", "cli"]
 
 [package]
 name = "leash"
@@ -22,9 +22,6 @@ rmp-serde = "1"
 # Error handling
 thiserror = "2"
 
-# Temporary files
-tempfile = "3"
-
 # Logging
 tracing = "0.1"
 
@@ -41,6 +38,15 @@ futures-lite = "2"
 
 # Compile-time templates
 askama = "0.12"
+
+# PTY support for interactive shells
+pty-process = "0.5"
+
+# Terminal raw mode
+crossterm = "0.29"
+
+# I/O polling for non-blocking operations
+polling = "3"
 
 # Random number generation
 rand = "0.8"

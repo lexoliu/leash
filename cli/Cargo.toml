@@ -1,0 +1,32 @@
+[package]
+name = "leash-cli"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+description = "CLI for leash sandbox"
+
+[[bin]]
+name = "leash"
+path = "src/main.rs"
+
+[dependencies]
+# The main library
+leash = { path = ".." }
+
+# CLI argument parsing
+clap = { version = "4", features = ["derive", "env"] }
+
+# Serialization for config files
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+
+# Async runtime - smol for consistency with library default
+smol = "2"
+executor-core = { version = "0.7", features = ["async-executor", "std"] }
+
+# Error handling
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
