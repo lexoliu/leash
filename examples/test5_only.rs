@@ -1,0 +1,74 @@
+//! Test 5 only - both Landlock and Seccomp
+
+use std::os::unix::process::CommandExt;
+use std::process::{Command, Stdio};
+
+fn main() {
+    println!("Test 5 ONLY: Command with both Landlock and Seccomp in pre_exec");
+    let mut cmd = Command::new("echo");
+    cmd.args(["test5"]);
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+    unsafe {
+        cmd.pre_exec(|| {
+            eprintln!("  pre_exec: applying both");
+
+            // Landlock
+            use landlock::{Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI};
+
+            let ruleset = Ruleset::default()
+                .handle_access(AccessFs::from_all(ABI::V4))
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("handle_access: {}", e)))?
+                .create()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("create: {}", e)))?;
+
+            let ruleset = if let Ok(path_fd) = PathFd::new("/tmp") {
+                ruleset.add_rule(PathBeneath::new(path_fd, AccessFs::from_all(ABI::V4)))
+                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("add_rule: {}", e)))?
+            } else {
+                ruleset
+            };
+
+            match ruleset.restrict_self() {
+                Ok(status) => eprintln!("  pre_exec: Landlock status = {:?}", status.ruleset),
+                Err(e) => {
+                    eprintln!("  pre_exec: Landlock restrict_self FAILED: {}", e);
+                    return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("restrict_self: {}", e)));
+                }
+            }
+
+            // Seccomp
+            use std::collections::BTreeMap;
+            use seccompiler::{SeccompAction, SeccompFilter, TargetArch};
+
+            let rules: BTreeMap<i64, Vec<seccompiler::SeccompRule>> = BTreeMap::new();
+            let filter = SeccompFilter::new(
+                rules,
+                SeccompAction::Errno(libc::EPERM as u32),
+                SeccompAction::Allow,
+                TargetArch::aarch64,
+            )
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("SeccompFilter: {:?}", e)))?;
+
+            let program: seccompiler::BpfProgram = filter.try_into()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("BpfProgram: {:?}", e)))?;
+
+            seccompiler::apply_filter(&program)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("apply_filter: {:?}", e)))?;
+
+            eprintln!("  pre_exec: Seccomp done");
+            Ok(())
+        });
+    }
+    match cmd.output() {
+        Ok(o) => {
+            println!("  exit status: {:?}", o.status);
+            println!("  exit code: {:?}", o.status.code());
+            println!("  stdout: {}", String::from_utf8_lossy(&o.stdout).trim());
+            println!("  stderr: {}", String::from_utf8_lossy(&o.stderr).trim());
+        }
+        Err(e) => println!("  FAIL: {}", e),
+    }
+
+    println!("\nDone!");
+}

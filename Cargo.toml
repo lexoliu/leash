@@ -61,7 +61,7 @@ optional = true
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
 seccompiler = "0.4"
-nix = { version = "0.29", features = ["process"] }
+nix = { version = "0.29", features = ["process", "feature"] }
 
 # Windows-specific dependencies
 [target.'cfg(target_os = "windows")'.dependencies]

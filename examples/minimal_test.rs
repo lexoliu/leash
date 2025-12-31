@@ -1,0 +1,87 @@
+//! Minimal test to isolate Landlock vs Seccomp issue
+
+use std::os::unix::process::CommandExt;
+use std::process::Command;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Testing Landlock only...");
+
+    // Test 1: Landlock only
+    let mut cmd = Command::new("echo");
+    cmd.args(["Landlock test"]);
+
+    unsafe {
+        cmd.pre_exec(|| {
+            use landlock::{Access, AccessFs, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI};
+
+            let abi = ABI::V4;
+            let ruleset = Ruleset::default()
+                .handle_access(AccessFs::from_all(abi))
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("handle_access: {}", e)))?
+                .create()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("create: {}", e)))?;
+
+            let status = ruleset
+                .restrict_self()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("restrict_self: {}", e)))?;
+
+            println!("Landlock status: {:?}", status);
+            Ok(())
+        });
+    }
+
+    match cmd.output() {
+        Ok(out) => {
+            println!("Landlock test succeeded!");
+            println!("Output: {}", String::from_utf8_lossy(&out.stdout));
+        }
+        Err(e) => {
+            println!("Landlock test failed: {}", e);
+        }
+    }
+
+    println!("\nTesting Seccomp only...");
+
+    // Test 2: Seccomp only
+    let mut cmd2 = Command::new("echo");
+    cmd2.args(["Seccomp test"]);
+
+    unsafe {
+        cmd2.pre_exec(|| {
+            use std::collections::BTreeMap;
+            use seccompiler::{SeccompAction, SeccompFilter, TargetArch};
+
+            let rules: BTreeMap<i64, Vec<seccompiler::SeccompRule>> = BTreeMap::new();
+
+            // Simple allow-all filter
+            let filter = SeccompFilter::new(
+                rules,
+                SeccompAction::Errno(libc::EPERM as u32),
+                SeccompAction::Allow,
+                TargetArch::aarch64,  // Adjust based on arch
+            )
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("SeccompFilter::new: {:?}", e)))?;
+
+            let program: seccompiler::BpfProgram = filter
+                .try_into()
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("BpfProgram: {:?}", e)))?;
+
+            seccompiler::apply_filter(&program)
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("apply_filter: {:?}", e)))?;
+
+            Ok(())
+        });
+    }
+
+    match cmd2.output() {
+        Ok(out) => {
+            println!("Seccomp test succeeded!");
+            println!("Output: {}", String::from_utf8_lossy(&out.stdout));
+        }
+        Err(e) => {
+            println!("Seccomp test failed: {}", e);
+        }
+    }
+
+    Ok(())
+}
