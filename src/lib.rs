@@ -64,6 +64,7 @@ mod error;
 pub mod ipc;
 mod network;
 mod platform;
+#[cfg(target_os = "macos")]
 pub mod pty;
 mod python;
 mod sandbox;
