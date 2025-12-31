@@ -292,13 +292,24 @@ impl LinuxBackend {
         let mut landlock_opt = Some(landlock_ruleset);
         let mut seccomp_opt = Some(seccomp_filter);
 
-        // DEBUG: Test with empty pre_exec hook (no sandbox)
-        let _ = landlock_opt;
+        // DEBUG: Test Landlock only with detailed error output
         let _ = seccomp_opt;
 
         unsafe {
             cmd.pre_exec(move || {
-                // Empty hook - just return Ok
+                use std::io::Write;
+                if let Some(landlock) = landlock_opt.take() {
+                    match landlock.restrict_self() {
+                        Ok(()) => {
+                            let _ = std::io::stderr().write_all(b"Landlock: restrict_self succeeded\n");
+                        }
+                        Err(e) => {
+                            let msg = format!("Landlock error: {}\n", e);
+                            let _ = std::io::stderr().write_all(msg.as_bytes());
+                            return Err(std::io::Error::new(std::io::ErrorKind::Other, e));
+                        }
+                    }
+                }
                 Ok(())
             });
         }
