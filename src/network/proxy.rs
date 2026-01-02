@@ -260,12 +260,25 @@ async fn handle_connect<N: NetworkPolicy, E: Executor + 'static>(
     policy: Arc<N>,
     executor: ExecutorWrapper<E>,
 ) -> std::result::Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
-    let host_port = req
-        .uri()
-        .authority()
-        .map(|a| a.to_string())
-        .unwrap_or_default();
-    let (host, port) = parse_host_port(&host_port, 443);
+    let authority = match req.uri().authority() {
+        Some(authority) => authority,
+        None => {
+            return Ok(Response::builder()
+                .status(StatusCode::BAD_REQUEST)
+                .body(full_body("Missing CONNECT authority"))
+                .unwrap());
+        }
+    };
+
+    let host = authority.host().to_string();
+    let port = authority.port_u16().unwrap_or(443);
+
+    if host.is_empty() {
+        return Ok(Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(full_body("Invalid CONNECT authority"))
+            .unwrap());
+    }
 
     // Check policy
     let domain_req = DomainRequest::new(host.clone(), port, ConnectionDirection::Outbound, 0);
@@ -282,7 +295,7 @@ async fn handle_connect<N: NetworkPolicy, E: Executor + 'static>(
     tracing::debug!(host = %host, port = port, "network proxy: connection allowed");
 
     // Spawn a task to handle the tunnel after upgrade
-    let target_addr = format!("{}:{}", host, port);
+    let target_addr = format_target_addr(&host, port);
 
     executor.execute(async move {
         match hyper::upgrade::on(req).await {
@@ -336,7 +349,7 @@ async fn handle_http<N: NetworkPolicy, E: Executor + 'static>(
     tracing::debug!(host = %host, port = port, path = %uri.path(), "network proxy: HTTP request allowed");
 
     // Connect to target and forward request
-    let target_addr = format!("{}:{}", host, port);
+    let target_addr = format_target_addr(&host, port);
     let target_stream = match TcpStream::connect(&target_addr).await {
         Ok(s) => s,
         Err(e) => {
@@ -403,15 +416,13 @@ async fn handle_http<N: NetworkPolicy, E: Executor + 'static>(
     }
 }
 
-/// Parse host:port from target string
-fn parse_host_port(target: &str, default_port: u16) -> (String, u16) {
-    if let Some(colon_pos) = target.rfind(':') {
-        let host = target[..colon_pos].to_string();
-        if let Ok(port) = target[colon_pos + 1..].parse() {
-            return (host, port);
-        }
+/// Format a host/port pair for TcpStream::connect, including IPv6 brackets.
+fn format_target_addr(host: &str, port: u16) -> String {
+    if host.contains(':') {
+        format!("[{}]:{}", host, port)
+    } else {
+        format!("{}:{}", host, port)
     }
-    (target.to_string(), default_port)
 }
 
 /// Bidirectional tunnel between upgraded connection and target
@@ -493,13 +504,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_parse_host_port() {
-        let (host, port) = parse_host_port("example.com:443", 80);
-        assert_eq!(host, "example.com");
-        assert_eq!(port, 443);
-
-        let (host, port) = parse_host_port("example.com", 80);
-        assert_eq!(host, "example.com");
-        assert_eq!(port, 80);
+    fn test_format_target_addr() {
+        assert_eq!(format_target_addr("example.com", 443), "example.com:443");
+        assert_eq!(format_target_addr("127.0.0.1", 8080), "127.0.0.1:8080");
+        assert_eq!(format_target_addr("::1", 443), "[::1]:443");
+        assert_eq!(
+            format_target_addr("2001:db8::1", 80),
+            "[2001:db8::1]:80"
+        );
     }
 }

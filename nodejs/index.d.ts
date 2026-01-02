@@ -40,6 +40,8 @@ export interface SandboxConfigJs {
   network?: NetworkPolicyConfig
   /** Security configuration */
   security?: SecurityConfigJs
+  /** Enable strict filesystem mode (deny reads outside sandbox/allowlist) */
+  filesystemStrict?: boolean
   /** Paths with write access */
   writablePaths?: Array<string>
   /** Paths with read-only access */
@@ -206,7 +208,7 @@ export declare class IpcRouterJs {
  * - Stop the network proxy
  * - Stop the IPC server (if enabled)
  * - Kill all child processes that were spawned within it
- * - Delete the working directory (unless `keepWorkingDir()` was called)
+ * - Delete the working directory if it was auto-created (unless `keepWorkingDir()` was called)
  */
 export declare class Sandbox {
   /** Create a new sandbox with optional configuration */
@@ -227,7 +229,7 @@ export declare class Sandbox {
    * This will:
    * - Stop the network proxy
    * - Kill all child processes
-   * - Delete the working directory (unless keepWorkingDir was called)
+   * - Delete the working directory if it was auto-created (unless keepWorkingDir was called)
    */
   dispose(): Promise<void>
 }

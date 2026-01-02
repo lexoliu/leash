@@ -5,7 +5,7 @@
 //! - Filesystem access control (read, write, execute, etc.)
 //! - Network TCP connection restrictions
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use landlock::{
     make_bitflags, Access, AccessFs, AccessNet, BitFlags, NetPort, PathBeneath, PathFd, Ruleset,
@@ -15,6 +15,60 @@ use landlock::{
 use crate::config::SandboxConfigData;
 use crate::error::{Error, Result};
 use crate::security::SecurityConfig;
+
+/// Minimal config snapshot for building Landlock rulesets
+#[derive(Clone)]
+pub struct LandlockConfig {
+    security: SecurityConfig,
+    writable_paths: Vec<PathBuf>,
+    readable_paths: Vec<PathBuf>,
+    executable_paths: Vec<PathBuf>,
+    python_venv_path: Option<PathBuf>,
+    working_dir: PathBuf,
+    filesystem_strict: bool,
+}
+
+impl LandlockConfig {
+    pub fn from_config(config: &SandboxConfigData) -> Self {
+        Self {
+            security: config.security().clone(),
+            writable_paths: config.writable_paths().to_vec(),
+            readable_paths: config.readable_paths().to_vec(),
+            executable_paths: config.executable_paths().to_vec(),
+            python_venv_path: config.python().map(|p| p.venv().path().to_path_buf()),
+            working_dir: config.working_dir().to_path_buf(),
+            filesystem_strict: config.filesystem_strict(),
+        }
+    }
+
+    pub fn security(&self) -> &SecurityConfig {
+        &self.security
+    }
+
+    pub fn writable_paths(&self) -> &[PathBuf] {
+        &self.writable_paths
+    }
+
+    pub fn readable_paths(&self) -> &[PathBuf] {
+        &self.readable_paths
+    }
+
+    pub fn executable_paths(&self) -> &[PathBuf] {
+        &self.executable_paths
+    }
+
+    pub fn python_venv_path(&self) -> Option<&Path> {
+        self.python_venv_path.as_deref()
+    }
+
+    pub fn working_dir(&self) -> &Path {
+        &self.working_dir
+    }
+
+    pub fn filesystem_strict(&self) -> bool {
+        self.filesystem_strict
+    }
+}
 
 /// A prepared Landlock ruleset ready to be applied in pre_exec
 pub struct PreparedRuleset {
@@ -45,7 +99,7 @@ impl PreparedRuleset {
 }
 
 /// Build a Landlock ruleset from sandbox configuration
-pub fn build_ruleset(config: &SandboxConfigData, proxy_port: u16) -> Result<PreparedRuleset> {
+pub fn build_ruleset(config: &LandlockConfig, proxy_port: u16) -> Result<PreparedRuleset> {
     // We require ABI v4 for network restrictions
     let abi = ABI::V4;
 
@@ -63,7 +117,24 @@ pub fn build_ruleset(config: &SandboxConfigData, proxy_port: u16) -> Result<Prep
 
     // --- System paths (read + execute for binaries/libraries) ---
     // These paths need both read and execute for running programs
-    let system_exec_paths = ["/usr", "/lib", "/lib64", "/lib32", "/bin", "/sbin"];
+    let system_exec_paths = if config.filesystem_strict() {
+        [
+            "/bin",
+            "/sbin",
+            "/usr/bin",
+            "/usr/sbin",
+            "/usr/lib",
+            "/usr/lib64",
+            "/usr/lib32",
+            "/lib",
+            "/lib64",
+            "/lib32",
+            "/usr/libexec",
+            "/usr/local",
+        ]
+    } else {
+        ["/usr", "/lib", "/lib64", "/lib32", "/bin", "/sbin"]
+    };
     let system_exec_access = make_bitflags!(AccessFs::{
         ReadFile | ReadDir | Execute
     });
@@ -73,15 +144,17 @@ pub fn build_ruleset(config: &SandboxConfigData, proxy_port: u16) -> Result<Prep
     }
 
     // System config and pseudo-filesystems (read-only, no execute needed)
-    let system_read_paths = [
-        "/etc",
-        "/proc",
-        "/sys",
-        "/run", // Needed for various runtime files
-    ];
+    if !config.filesystem_strict() {
+        let system_read_paths = [
+            "/etc",
+            "/proc",
+            "/sys",
+            "/run", // Needed for various runtime files
+        ];
 
-    for path in &system_read_paths {
-        add_path_rule(&mut ruleset, path, AccessFs::from_read(abi))?;
+        for path in &system_read_paths {
+            add_path_rule(&mut ruleset, path, AccessFs::from_read(abi))?;
+        }
     }
 
     // --- Temp directories (read + write) ---
@@ -115,12 +188,8 @@ pub fn build_ruleset(config: &SandboxConfigData, proxy_port: u16) -> Result<Prep
     }
 
     // --- Python venv if configured ---
-    if let Some(python_config) = config.python() {
-        add_path_rule(
-            &mut ruleset,
-            python_config.venv().path(),
-            AccessFs::from_all(abi),
-        )?;
+    if let Some(venv_path) = config.python_venv_path() {
+        add_path_rule(&mut ruleset, venv_path, AccessFs::from_all(abi))?;
     }
 
     // --- Apply security restrictions ---

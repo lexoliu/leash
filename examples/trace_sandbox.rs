@@ -1,8 +1,11 @@
 //! Trace sandbox execution to find where EINVAL comes from
 
+#[cfg(target_os = "linux")]
 use std::os::unix::process::CommandExt;
+#[cfg(target_os = "linux")]
 use std::process::{Command, Stdio};
 
+#[cfg(target_os = "linux")]
 fn main() {
     println!("Test 1: Plain command (no pre_exec)");
     let result = Command::new("echo")
@@ -165,4 +168,9 @@ fn main() {
     }
 
     println!("\nDone!");
+}
+
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    eprintln!("This example only runs on Linux.");
 }

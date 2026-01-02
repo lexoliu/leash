@@ -56,6 +56,8 @@ pub struct SandboxConfigJs {
     pub network: Option<NetworkPolicyConfig>,
     /// Security configuration
     pub security: Option<SecurityConfigJs>,
+    /// Enable strict filesystem mode (deny reads outside sandbox/allowlist)
+    pub filesystem_strict: Option<bool>,
     /// Paths with write access
     pub writable_paths: Option<Vec<String>>,
     /// Paths with read-only access
@@ -88,6 +90,9 @@ impl SandboxConfigJs {
         // Security config
         if let Some(security) = self.security {
             builder = builder.security(security.into_rust());
+        }
+        if let Some(strict_fs) = self.filesystem_strict {
+            builder = builder.filesystem_strict(strict_fs);
         }
 
         // Path configurations
@@ -131,6 +136,7 @@ pub fn preset_strict() -> SandboxConfigJs {
     SandboxConfigJs {
         network: None, // DenyAll
         security: None, // Strict by default
+        filesystem_strict: Some(true),
         writable_paths: None,
         readable_paths: None,
         executable_paths: None,
@@ -147,6 +153,7 @@ pub fn preset_python_dev() -> SandboxConfigJs {
     SandboxConfigJs {
         network: None,
         security: None,
+        filesystem_strict: None,
         writable_paths: None,
         readable_paths: None,
         executable_paths: None,
@@ -166,6 +173,7 @@ pub fn preset_python_data_science() -> SandboxConfigJs {
     SandboxConfigJs {
         network: None,
         security: None,
+        filesystem_strict: None,
         writable_paths: None,
         readable_paths: Some(vec!["/usr/share".to_string()]),
         executable_paths: Some(vec![

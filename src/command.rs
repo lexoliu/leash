@@ -234,6 +234,6 @@ impl<'a> Command<'a> {
         // Register the child process for tracking
         self.process_tracker.register(child.id());
 
-        Ok(child)
+        Ok(child.with_tracker(self.process_tracker.clone()))
     }
 }

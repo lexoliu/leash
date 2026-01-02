@@ -51,9 +51,24 @@
 ; =============================================================================
 ; File system access
 ; =============================================================================
+{% if filesystem_strict %}
+; Strict filesystem: allow reads only for system binaries/libs and configured paths
+(allow file-read* (subpath "/bin"))
+(allow file-read* (subpath "/sbin"))
+(allow file-read* (subpath "/usr/bin"))
+(allow file-read* (subpath "/usr/sbin"))
+(allow file-read* (subpath "/usr/lib"))
+(allow file-read* (subpath "/usr/libexec"))
+(allow file-read* (subpath "/System/Library"))
+(allow file-read* (subpath "/Library"))
+(allow file-read* (subpath "/opt/homebrew"))
+(allow file-read* (subpath "/usr/local"))
+(allow file-read* (subpath "/Applications"))
+{% else %}
 ; Allow file reads broadly - macOS has too many interconnected paths to enumerate
 ; Sensitive paths are denied below with specific rules
 (allow file-read*)
+{% endif %}
 
 ; Process execution - restricted to known safe paths
 (allow process-exec (subpath "/bin"))

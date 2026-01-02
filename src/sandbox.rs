@@ -43,7 +43,6 @@ impl ProcessTracker {
     }
 
     /// Unregister a process (when it exits normally)
-    #[allow(dead_code)]
     pub fn unregister(&self, pid: u32) {
         if let Ok(mut pids) = self.pids.lock() {
             pids.retain(|&p| p != pid);
@@ -81,7 +80,8 @@ impl ProcessTracker {
 /// - Stop the network proxy
 /// - Stop the IPC server (if enabled)
 /// - Kill all child processes that were spawned within it
-/// - Delete the working directory (unless `keep_working_dir()` was called)
+/// - Delete the working directory if it was auto-created,
+///   unless `keep_working_dir()` was called
 pub struct Sandbox<N: NetworkPolicy = DenyAll> {
     config_data: SandboxConfigData,
     backend: NativeBackend,
@@ -89,6 +89,7 @@ pub struct Sandbox<N: NetworkPolicy = DenyAll> {
     ipc_server: Option<IpcServer>,
     process_tracker: ProcessTracker,
     working_dir_path: PathBuf,
+    working_dir_auto_created: bool,
     keep_working_dir: bool,
 }
 
@@ -136,6 +137,7 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
         // Extract the network policy for the proxy
         let (policy, mut config_data) = config.into_parts();
         let working_dir_path = config_data.working_dir.clone();
+        let working_dir_auto_created = config_data.working_dir_auto_created;
 
         // Create and start the network proxy
         let proxy = NetworkProxy::new(policy, executor.clone()).await?;
@@ -163,13 +165,15 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
             ipc_server,
             process_tracker: ProcessTracker::new(),
             working_dir_path,
+            working_dir_auto_created,
             keep_working_dir: false,
         })
     }
 
     /// Keep the working directory after the sandbox is dropped
     ///
-    /// By default, the working directory is deleted when the sandbox is dropped.
+    /// By default, auto-created working directories are deleted when the sandbox is dropped.
+    /// User-provided working directories are preserved by default.
     /// Call this method to preserve the working directory for inspection or reuse.
     ///
     /// Note: Child processes are always killed when the sandbox is dropped,
@@ -294,8 +298,10 @@ impl<N: NetworkPolicy> Drop for Sandbox<N> {
         self.process_tracker.kill_all();
         tracing::debug!("killed all sandbox child processes");
 
-        // Delete working directory unless keep_working_dir was called
-        if !self.keep_working_dir {
+        // Delete auto-created working directory unless keep_working_dir was called
+        let should_delete = !self.keep_working_dir && self.working_dir_auto_created;
+
+        if should_delete {
             if let Err(e) = remove_dir_all::remove_dir_all(&self.working_dir_path) {
                 tracing::warn!(
                     path = %self.working_dir_path.display(),

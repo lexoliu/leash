@@ -5,10 +5,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_net::unix::UnixListener;
 use executor_core::{Executor, Task};
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
+use futures_lite::StreamExt;
 
 use crate::ipc::protocol::{IpcError, IpcRequest, IpcResponse};
 use crate::ipc::router::IpcRouter;
@@ -92,16 +94,31 @@ async fn run_server<E: Executor + Clone + 'static>(
     running: Arc<AtomicBool>,
     executor: E,
 ) {
+    let mut incoming = listener.incoming();
+
     while running.load(Ordering::SeqCst) {
-        match listener.accept().await {
-            Ok((stream, _addr)) => {
+        let accept_result = futures_lite::future::or(
+            async { incoming.next().await },
+            async {
+                futures_lite::future::yield_now().await;
+                async_io::Timer::after(Duration::from_millis(100)).await;
+                None
+            },
+        )
+        .await;
+
+        match accept_result {
+            Some(Ok(stream)) => {
                 let router = Arc::clone(&router);
                 executor.spawn(handle_connection(stream, router)).detach();
             }
-            Err(e) => {
+            Some(Err(e)) => {
                 if running.load(Ordering::SeqCst) {
                     tracing::warn!(error = %e, "failed to accept IPC connection");
                 }
+            }
+            None => {
+                // Timeout or listener closed; loop to re-check running flag
             }
         }
     }

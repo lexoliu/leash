@@ -214,7 +214,7 @@ pub struct CommonArgs {
     #[arg(long)]
     pub working_dir: Option<PathBuf>,
 
-    /// Keep working directory after sandbox exits
+    /// Keep auto-created working directory after sandbox exits
     #[arg(long)]
     pub keep_working_dir: bool,
 

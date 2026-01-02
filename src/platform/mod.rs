@@ -3,6 +3,7 @@ use std::process::{ExitStatus, Output, Stdio};
 
 use crate::config::SandboxConfigData;
 use crate::error::Result;
+use crate::sandbox::ProcessTracker;
 
 #[cfg(target_os = "macos")]
 pub mod macos;
@@ -16,11 +17,26 @@ pub mod windows;
 /// A spawned child process in the sandbox
 pub struct Child {
     inner: std::process::Child,
+    tracker: Option<ProcessTracker>,
 }
 
 impl Child {
     pub(crate) fn new(inner: std::process::Child) -> Self {
-        Self { inner }
+        Self {
+            inner,
+            tracker: None,
+        }
+    }
+
+    pub(crate) fn with_tracker(mut self, tracker: ProcessTracker) -> Self {
+        self.tracker = Some(tracker);
+        self
+    }
+
+    fn unregister_if_tracked(&mut self) {
+        if let Some(tracker) = self.tracker.take() {
+            tracker.unregister(self.id());
+        }
     }
 
     /// Access the child's stdin
@@ -62,14 +78,21 @@ impl Child {
     pub async fn wait(&mut self) -> Result<ExitStatus> {
         // For now, use blocking wait wrapped in a poll
         // In a real implementation, this would use async I/O
-        Ok(self.inner.wait()?)
+        let status = self.inner.wait()?;
+        self.unregister_if_tracked();
+        Ok(status)
     }
 
     /// Wait for the child to exit and collect all output
     pub async fn wait_with_output(self) -> Result<Output> {
         // For now, use blocking wait_with_output
         // In a real implementation, this would use async I/O
-        Ok(self.inner.wait_with_output()?)
+        let pid = self.inner.id();
+        let output = self.inner.wait_with_output()?;
+        if let Some(tracker) = self.tracker {
+            tracker.unregister(pid);
+        }
+        Ok(output)
     }
 
     /// Attempt to kill the child process
@@ -79,7 +102,11 @@ impl Child {
 
     /// Check if the child has exited without blocking
     pub fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
-        Ok(self.inner.try_wait()?)
+        let status = self.inner.try_wait()?;
+        if status.is_some() {
+            self.unregister_if_tracked();
+        }
+        Ok(status)
     }
 }
 

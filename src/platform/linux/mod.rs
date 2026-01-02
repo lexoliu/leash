@@ -9,6 +9,7 @@ use std::process::{Command, Output, Stdio};
 use crate::config::SandboxConfigData;
 use crate::error::{Error, Result};
 use crate::platform::{Backend, Child};
+use crate::platform::linux::landlock_rules::LandlockConfig;
 
 /// Minimum required kernel version for full security (Landlock ABI v4)
 const MIN_KERNEL_VERSION: KernelVersion = KernelVersion::new(6, 7, 0);
@@ -256,10 +257,12 @@ impl LinuxBackend {
         stderr: Stdio,
     ) -> Result<Command> {
         // Build Landlock ruleset (validated at creation time)
-        let landlock_ruleset = landlock_rules::build_ruleset(config, proxy_port)?;
+        let landlock_config = LandlockConfig::from_config(config);
+        let landlock_ruleset = landlock_rules::build_ruleset(&landlock_config, proxy_port)?;
 
         // Build Seccomp BPF filter
-        let seccomp_filter = seccomp_filter::build_filter(config.security())?;
+        let security = config.security().clone();
+        let seccomp_filter = seccomp_filter::build_filter(&security)?;
 
         let mut cmd = Command::new(program);
         cmd.args(args);
@@ -291,12 +294,11 @@ impl LinuxBackend {
         // Don't use pre-built rulesets - build them inside pre_exec to avoid fd inheritance issues
         let _ = landlock_ruleset;
         let _ = seccomp_filter;
-        let config_clone = config.clone();
 
         unsafe {
             cmd.pre_exec(move || {
                 // Build and apply Landlock ruleset inside the child process
-                let ruleset = crate::platform::linux::landlock_rules::build_ruleset(&config_clone, proxy_port)
+                let ruleset = crate::platform::linux::landlock_rules::build_ruleset(&landlock_config, proxy_port)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Landlock build failed: {}", e)))?;
 
                 ruleset
@@ -304,7 +306,7 @@ impl LinuxBackend {
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
                 // Build and apply Seccomp filter
-                let filter = crate::platform::linux::seccomp_filter::build_filter(config_clone.security())
+                let filter = crate::platform::linux::seccomp_filter::build_filter(&security)
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Seccomp build failed: {}", e)))?;
 
                 filter

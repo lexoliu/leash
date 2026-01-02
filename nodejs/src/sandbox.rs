@@ -23,7 +23,7 @@ pub(crate) struct SandboxInner {
 /// - Stop the network proxy
 /// - Stop the IPC server (if enabled)
 /// - Kill all child processes that were spawned within it
-/// - Delete the working directory (unless `keepWorkingDir()` was called)
+/// - Delete the working directory if it was auto-created (unless `keepWorkingDir()` was called)
 #[napi]
 pub struct Sandbox {
     inner: Arc<Mutex<Option<SandboxInner>>>,
@@ -113,7 +113,7 @@ impl Sandbox {
     /// This will:
     /// - Stop the network proxy
     /// - Kill all child processes
-    /// - Delete the working directory (unless keepWorkingDir was called)
+    /// - Delete the working directory if it was auto-created (unless keepWorkingDir was called)
     #[napi]
     pub async fn dispose(&self) -> Result<()> {
         let mut guard = self.inner.lock().await;

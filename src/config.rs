@@ -225,6 +225,8 @@ pub struct SandboxConfigData {
     pub(crate) executable_paths: Vec<PathBuf>,
     pub(crate) python: Option<PythonConfig>,
     pub(crate) working_dir: PathBuf,
+    pub(crate) working_dir_auto_created: bool,
+    pub(crate) filesystem_strict: bool,
     pub(crate) env_passthrough: Vec<String>,
     pub(crate) limits: ResourceLimits,
     pub(crate) ipc: Option<IpcRouter>,
@@ -255,6 +257,10 @@ impl SandboxConfigData {
         &self.working_dir
     }
 
+    pub fn filesystem_strict(&self) -> bool {
+        self.filesystem_strict
+    }
+
     pub fn env_passthrough(&self) -> &[String] {
         &self.env_passthrough
     }
@@ -277,6 +283,8 @@ pub struct SandboxConfig<N: NetworkPolicy = DenyAll> {
     executable_paths: Vec<PathBuf>,
     python: Option<PythonConfig>,
     working_dir: PathBuf,
+    working_dir_auto_created: bool,
+    filesystem_strict: bool,
     env_passthrough: Vec<String>,
     limits: ResourceLimits,
     ipc: Option<IpcRouter>,
@@ -311,6 +319,8 @@ impl<N: NetworkPolicy> SandboxConfig<N> {
                 executable_paths: self.executable_paths,
                 python: self.python,
                 working_dir: self.working_dir,
+                working_dir_auto_created: self.working_dir_auto_created,
+                filesystem_strict: self.filesystem_strict,
                 env_passthrough: self.env_passthrough,
                 limits: self.limits,
                 ipc: self.ipc,
@@ -346,6 +356,10 @@ impl<N: NetworkPolicy> SandboxConfig<N> {
         &self.working_dir
     }
 
+    pub fn filesystem_strict(&self) -> bool {
+        self.filesystem_strict
+    }
+
     pub fn env_passthrough(&self) -> &[String] {
         &self.env_passthrough
     }
@@ -368,6 +382,7 @@ pub struct SandboxConfigBuilder<N: NetworkPolicy = DenyAll> {
     executable_paths: Vec<PathBuf>,
     python: Option<PythonConfig>,
     working_dir: Option<PathBuf>,
+    filesystem_strict: bool,
     env_passthrough: Vec<String>,
     limits: ResourceLimits,
     ipc: Option<IpcRouter>,
@@ -383,6 +398,7 @@ impl Default for SandboxConfigBuilder<DenyAll> {
             executable_paths: Vec::new(),
             python: None,
             working_dir: None, // Will generate random name on build()
+            filesystem_strict: false,
             env_passthrough: Vec::new(),
             limits: ResourceLimits::default(),
             ipc: None,
@@ -401,6 +417,7 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
             executable_paths: self.executable_paths,
             python: self.python,
             working_dir: self.working_dir,
+            filesystem_strict: self.filesystem_strict,
             env_passthrough: self.env_passthrough,
             limits: self.limits,
             ipc: self.ipc,
@@ -451,6 +468,12 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
         self
     }
 
+    /// Enable strict filesystem mode (deny reads outside sandbox/allowlist).
+    pub fn filesystem_strict(mut self, enabled: bool) -> Self {
+        self.filesystem_strict = enabled;
+        self
+    }
+
     /// Set the working directory path
     ///
     /// If not set, a random directory name will be generated in the current directory.
@@ -484,6 +507,7 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
 
     pub fn build(self) -> Result<SandboxConfig<N>> {
         // Resolve working directory: use specified path or create random one
+        let working_dir_auto_created = self.working_dir.is_none();
         let working_dir = match self.working_dir {
             Some(path) => {
                 // User specified a path - create if needed
@@ -515,6 +539,8 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
             executable_paths: self.executable_paths,
             python: self.python,
             working_dir,
+            working_dir_auto_created,
+            filesystem_strict: self.filesystem_strict,
             env_passthrough: self.env_passthrough,
             limits: self.limits,
             ipc: self.ipc,
@@ -523,8 +549,12 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
 }
 
 /// Create a strict sandbox config with no network and minimal access
+///
+/// Strict mode denies filesystem reads outside the sandbox/allowlist.
 pub fn strict_preset() -> Result<SandboxConfig<DenyAll>> {
-    SandboxConfigBuilder::default().build()
+    SandboxConfigBuilder::default()
+        .filesystem_strict(true)
+        .build()
 }
 
 /// Create a sandbox config for Python development with pip install capability

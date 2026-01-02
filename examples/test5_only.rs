@@ -1,8 +1,11 @@
 //! Test 5 only - both Landlock and Seccomp
 
+#[cfg(target_os = "linux")]
 use std::os::unix::process::CommandExt;
+#[cfg(target_os = "linux")]
 use std::process::{Command, Stdio};
 
+#[cfg(target_os = "linux")]
 fn main() {
     println!("Test 5 ONLY: Command with both Landlock and Seccomp in pre_exec");
     let mut cmd = Command::new("echo");
@@ -71,4 +74,9 @@ fn main() {
     }
 
     println!("\nDone!");
+}
+
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    eprintln!("This example only runs on Linux.");
 }

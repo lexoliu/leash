@@ -1,8 +1,11 @@
 //! Minimal test to isolate Landlock vs Seccomp issue
 
+#[cfg(target_os = "linux")]
 use std::os::unix::process::CommandExt;
+#[cfg(target_os = "linux")]
 use std::process::Command;
 
+#[cfg(target_os = "linux")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Testing Landlock only...");
 
@@ -84,4 +87,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn main() {
+    eprintln!("This example only runs on Linux.");
 }
