@@ -117,8 +117,8 @@ pub fn build_ruleset(config: &LandlockConfig, proxy_port: u16) -> Result<Prepare
 
     // --- System paths (read + execute for binaries/libraries) ---
     // These paths need both read and execute for running programs
-    let system_exec_paths = if config.filesystem_strict() {
-        [
+    let system_exec_paths: &[&str] = if config.filesystem_strict() {
+        &[
             "/bin",
             "/sbin",
             "/usr/bin",
@@ -133,7 +133,7 @@ pub fn build_ruleset(config: &LandlockConfig, proxy_port: u16) -> Result<Prepare
             "/usr/local",
         ]
     } else {
-        ["/usr", "/lib", "/lib64", "/lib32", "/bin", "/sbin"]
+        &["/usr", "/lib", "/lib64", "/lib32", "/bin", "/sbin"]
     };
     let system_exec_access = make_bitflags!(AccessFs::{
         ReadFile | ReadDir | Execute
