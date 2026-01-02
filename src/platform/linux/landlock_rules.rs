@@ -139,7 +139,7 @@ pub fn build_ruleset(config: &LandlockConfig, proxy_port: u16) -> Result<Prepare
         ReadFile | ReadDir | Execute
     });
 
-    for path in &system_exec_paths {
+    for path in system_exec_paths {
         add_path_rule(&mut ruleset, path, system_exec_access)?;
     }
 
