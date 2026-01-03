@@ -23,6 +23,7 @@ pub struct LandlockConfig {
     writable_paths: Vec<PathBuf>,
     readable_paths: Vec<PathBuf>,
     executable_paths: Vec<PathBuf>,
+    network_deny_all: bool,
     python_venv_path: Option<PathBuf>,
     working_dir: PathBuf,
     filesystem_strict: bool,
@@ -35,6 +36,7 @@ impl LandlockConfig {
             writable_paths: config.writable_paths().to_vec(),
             readable_paths: config.readable_paths().to_vec(),
             executable_paths: config.executable_paths().to_vec(),
+            network_deny_all: config.network_deny_all(),
             python_venv_path: config.python().map(|p| p.venv().path().to_path_buf()),
             working_dir: config.working_dir().to_path_buf(),
             filesystem_strict: config.filesystem_strict(),
@@ -55,6 +57,10 @@ impl LandlockConfig {
 
     pub fn executable_paths(&self) -> &[PathBuf] {
         &self.executable_paths
+    }
+
+    pub fn network_deny_all(&self) -> bool {
+        self.network_deny_all
     }
 
     pub fn python_venv_path(&self) -> Option<&Path> {
@@ -117,9 +123,15 @@ pub fn build_ruleset(config: &LandlockConfig, proxy_port: u16) -> Result<Prepare
 
     let mut ruleset = Ruleset::default()
         .handle_access(fs_access)
-        .map_err(|e| Error::InvalidProfile(format!("Landlock fs access error: {}", e)))?
-        .handle_access(net_access)
-        .map_err(|e| Error::InvalidProfile(format!("Landlock net access error: {}", e)))?
+        .map_err(|e| Error::InvalidProfile(format!("Landlock fs access error: {}", e)))?;
+
+    if !config.network_deny_all() {
+        ruleset = ruleset
+            .handle_access(net_access)
+            .map_err(|e| Error::InvalidProfile(format!("Landlock net access error: {}", e)))?;
+    }
+
+    let mut ruleset = ruleset
         .create()
         .map_err(|e| Error::InvalidProfile(format!("Landlock ruleset create error: {}", e)))?;
 
@@ -209,9 +221,11 @@ pub fn build_ruleset(config: &LandlockConfig, proxy_port: u16) -> Result<Prepare
     apply_security_config(&mut ruleset, config.security(), abi)?;
 
     // --- Network: Only allow TCP connections to proxy port ---
-    ruleset = ruleset
-        .add_rule(NetPort::new(proxy_port, AccessNet::ConnectTcp))
-        .map_err(|e| Error::InvalidProfile(format!("Landlock network rule error: {}", e)))?;
+    if !config.network_deny_all() {
+        ruleset = ruleset
+            .add_rule(NetPort::new(proxy_port, AccessNet::ConnectTcp))
+            .map_err(|e| Error::InvalidProfile(format!("Landlock network rule error: {}", e)))?;
+    }
 
     tracing::debug!(
         proxy_port = proxy_port,

@@ -262,7 +262,7 @@ impl LinuxBackend {
 
         // Build Seccomp BPF filter
         let security = config.security().clone();
-        let seccomp_filter = seccomp_filter::build_filter(&security)?;
+        let seccomp_filter = seccomp_filter::build_filter(&security, config.network_deny_all())?;
 
         let mut cmd = Command::new(program);
         cmd.args(args);

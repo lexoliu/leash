@@ -1,3 +1,4 @@
+use std::any::TypeId;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
@@ -223,6 +224,7 @@ pub struct SandboxConfigData {
     pub(crate) writable_paths: Vec<PathBuf>,
     pub(crate) readable_paths: Vec<PathBuf>,
     pub(crate) executable_paths: Vec<PathBuf>,
+    pub(crate) network_deny_all: bool,
     pub(crate) python: Option<PythonConfig>,
     pub(crate) working_dir: PathBuf,
     pub(crate) working_dir_auto_created: bool,
@@ -247,6 +249,10 @@ impl SandboxConfigData {
 
     pub fn executable_paths(&self) -> &[PathBuf] {
         &self.executable_paths
+    }
+
+    pub fn network_deny_all(&self) -> bool {
+        self.network_deny_all
     }
 
     pub fn python(&self) -> Option<&PythonConfig> {
@@ -281,6 +287,7 @@ pub struct SandboxConfig<N: NetworkPolicy = DenyAll> {
     writable_paths: Vec<PathBuf>,
     readable_paths: Vec<PathBuf>,
     executable_paths: Vec<PathBuf>,
+    network_deny_all: bool,
     python: Option<PythonConfig>,
     working_dir: PathBuf,
     working_dir_auto_created: bool,
@@ -317,6 +324,7 @@ impl<N: NetworkPolicy> SandboxConfig<N> {
                 writable_paths: self.writable_paths,
                 readable_paths: self.readable_paths,
                 executable_paths: self.executable_paths,
+                network_deny_all: self.network_deny_all,
                 python: self.python,
                 working_dir: self.working_dir,
                 working_dir_auto_created: self.working_dir_auto_created,
@@ -380,6 +388,7 @@ pub struct SandboxConfigBuilder<N: NetworkPolicy = DenyAll> {
     writable_paths: Vec<PathBuf>,
     readable_paths: Vec<PathBuf>,
     executable_paths: Vec<PathBuf>,
+    network_deny_all: bool,
     python: Option<PythonConfig>,
     working_dir: Option<PathBuf>,
     filesystem_strict: bool,
@@ -396,6 +405,7 @@ impl Default for SandboxConfigBuilder<DenyAll> {
             writable_paths: Vec::new(),
             readable_paths: Vec::new(),
             executable_paths: Vec::new(),
+            network_deny_all: true,
             python: None,
             working_dir: None, // Will generate random name on build()
             filesystem_strict: false,
@@ -415,6 +425,7 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
             writable_paths: self.writable_paths,
             readable_paths: self.readable_paths,
             executable_paths: self.executable_paths,
+            network_deny_all: TypeId::of::<M>() == TypeId::of::<DenyAll>(),
             python: self.python,
             working_dir: self.working_dir,
             filesystem_strict: self.filesystem_strict,
@@ -537,6 +548,7 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
             writable_paths: self.writable_paths,
             readable_paths: self.readable_paths,
             executable_paths: self.executable_paths,
+            network_deny_all: self.network_deny_all,
             python: self.python,
             working_dir,
             working_dir_auto_created,

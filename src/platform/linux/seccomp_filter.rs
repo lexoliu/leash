@@ -40,12 +40,12 @@ fn seccomp_error_to_io(error: seccompiler::Error) -> std::io::Error {
 }
 
 /// Build a Seccomp BPF filter from SecurityConfig
-pub fn build_filter(security: &SecurityConfig) -> Result<PreparedFilter> {
+pub fn build_filter(security: &SecurityConfig, network_deny_all: bool) -> Result<PreparedFilter> {
     let arch = detect_arch()?;
 
     // We use a default-allow policy with explicit blocks for dangerous syscalls
     // This is more practical than default-deny for a general-purpose sandbox
-    let rules = build_rules(security, arch)?;
+    let rules = build_rules(security, arch, network_deny_all)?;
 
     let filter = SeccompFilter::new(
         rules,
@@ -84,12 +84,13 @@ fn detect_arch() -> Result<TargetArch> {
 fn build_rules(
     security: &SecurityConfig,
     arch: TargetArch,
+    network_deny_all: bool,
 ) -> Result<BTreeMap<i64, Vec<SeccompRule>>> {
     let mut rules: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
 
     // --- CRITICAL: Network socket filtering ---
     // Block non-TCP socket creation to enforce complete network isolation
-    add_socket_restrictions(&mut rules, arch)?;
+    add_socket_restrictions(&mut rules, arch, network_deny_all)?;
 
     // --- Block dangerous syscalls ---
     add_dangerous_syscall_blocks(&mut rules)?;
@@ -112,6 +113,7 @@ fn build_rules(
 fn add_socket_restrictions(
     rules: &mut BTreeMap<i64, Vec<SeccompRule>>,
     _arch: TargetArch,
+    network_deny_all: bool,
 ) -> Result<()> {
     // socket() syscall: int socket(int domain, int type, int protocol)
     // arg0 = domain (AF_INET, AF_INET6, AF_UNIX, etc.)
@@ -137,18 +139,22 @@ fn add_socket_restrictions(
     // However, seccompiler doesn't support masking, so we block the common cases
 
     // Socket types (without flags)
+    const SOCK_STREAM: u64 = libc::SOCK_STREAM as u64;
     const SOCK_DGRAM: u64 = libc::SOCK_DGRAM as u64;
     const SOCK_RAW: u64 = libc::SOCK_RAW as u64;
 
     // Socket types with SOCK_NONBLOCK
+    const SOCK_STREAM_NONBLOCK: u64 = (libc::SOCK_STREAM | libc::SOCK_NONBLOCK) as u64;
     const SOCK_DGRAM_NONBLOCK: u64 = (libc::SOCK_DGRAM | libc::SOCK_NONBLOCK) as u64;
     const SOCK_RAW_NONBLOCK: u64 = (libc::SOCK_RAW | libc::SOCK_NONBLOCK) as u64;
 
     // Socket types with SOCK_CLOEXEC
+    const SOCK_STREAM_CLOEXEC: u64 = (libc::SOCK_STREAM | libc::SOCK_CLOEXEC) as u64;
     const SOCK_DGRAM_CLOEXEC: u64 = (libc::SOCK_DGRAM | libc::SOCK_CLOEXEC) as u64;
     const SOCK_RAW_CLOEXEC: u64 = (libc::SOCK_RAW | libc::SOCK_CLOEXEC) as u64;
 
     // Socket types with both flags
+    const SOCK_STREAM_BOTH: u64 = (libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC) as u64;
     const SOCK_DGRAM_BOTH: u64 = (libc::SOCK_DGRAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC) as u64;
     const SOCK_RAW_BOTH: u64 = (libc::SOCK_RAW | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC) as u64;
 
@@ -160,6 +166,7 @@ fn add_socket_restrictions(
     // Block UDP and RAW sockets for IPv4 and IPv6
     let dgram_types = [SOCK_DGRAM, SOCK_DGRAM_NONBLOCK, SOCK_DGRAM_CLOEXEC, SOCK_DGRAM_BOTH];
     let raw_types = [SOCK_RAW, SOCK_RAW_NONBLOCK, SOCK_RAW_CLOEXEC, SOCK_RAW_BOTH];
+    let stream_types = [SOCK_STREAM, SOCK_STREAM_NONBLOCK, SOCK_STREAM_CLOEXEC, SOCK_STREAM_BOTH];
 
     let mut socket_rules = Vec::new();
 
@@ -205,6 +212,27 @@ fn add_socket_restrictions(
             SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
                 .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
         ]).map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?);
+    }
+
+    if network_deny_all {
+        // Block TCP sockets (AF_INET/AF_INET6 + SOCK_STREAM variants)
+        for &sock_type in &stream_types {
+            // AF_INET + SOCK_STREAM
+            socket_rules.push(SeccompRule::new(vec![
+                SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET)
+                    .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
+                SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
+                    .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
+            ]).map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?);
+
+            // AF_INET6 + SOCK_STREAM
+            socket_rules.push(SeccompRule::new(vec![
+                SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET6)
+                    .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
+                SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
+                    .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
+            ]).map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?);
+        }
     }
 
     rules.insert(libc::SYS_socket, socket_rules);
