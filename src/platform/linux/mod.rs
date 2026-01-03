@@ -290,24 +290,29 @@ impl LinuxBackend {
         cmd.stderr(stderr);
 
         // CRITICAL: Apply sandbox restrictions after fork, before exec
-        // This closure runs in the child process
-        // Don't use pre-built rulesets - build them inside pre_exec to avoid fd inheritance issues
-        let _ = landlock_ruleset;
-        let _ = seccomp_filter;
+        // Keep pre_exec minimal and async-signal-safe: only apply pre-built rulesets/filters.
+        let mut landlock_ruleset = Some(landlock_ruleset);
+        let mut seccomp_filter = Some(seccomp_filter);
 
         unsafe {
             cmd.pre_exec(move || {
-                // Build and apply Landlock ruleset inside the child process
-                let ruleset = crate::platform::linux::landlock_rules::build_ruleset(&landlock_config, proxy_port)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Landlock build failed: {}", e)))?;
+                let ruleset = landlock_ruleset.take().ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Landlock ruleset already used",
+                    )
+                })?;
 
                 ruleset
                     .restrict_self()
                     .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
-                // Build and apply Seccomp filter
-                let filter = crate::platform::linux::seccomp_filter::build_filter(&security)
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("Seccomp build failed: {}", e)))?;
+                let filter = seccomp_filter.take().ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "Seccomp filter already used",
+                    )
+                })?;
 
                 filter
                     .apply()

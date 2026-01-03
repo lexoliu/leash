@@ -54,7 +54,7 @@ jobs:
       - name: Test sandbox isolation
         run: |
           echo "=== Testing sandbox isolation ==="
-          cargo run --example debug_sandbox || echo "Debug sandbox test completed"
+          cargo run --example debug_sandbox
 
   test-macos:
     runs-on: macos-latest
