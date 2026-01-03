@@ -97,8 +97,8 @@ impl PreparedRuleset {
 
 fn landlock_error_to_io(error: RulesetError) -> std::io::Error {
     match error {
-        RulesetError::RestrictSelf(RestrictSelfError::SetNoNewPrivsCall { source })
-        | RulesetError::RestrictSelf(RestrictSelfError::RestrictSelfCall { source }) => source,
+        RulesetError::RestrictSelf(RestrictSelfError::SetNoNewPrivsCall { source, .. })
+        | RulesetError::RestrictSelf(RestrictSelfError::RestrictSelfCall { source, .. }) => source,
         other => std::io::Error::new(
             std::io::ErrorKind::Other,
             format!("Landlock restrict_self failed: {other}"),
