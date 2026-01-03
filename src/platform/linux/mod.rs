@@ -305,7 +305,7 @@ impl LinuxBackend {
 
                 ruleset
                     .restrict_self()
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                    ?;
 
                 let filter = seccomp_filter.take().ok_or_else(|| {
                     std::io::Error::new(
@@ -314,9 +314,7 @@ impl LinuxBackend {
                     )
                 })?;
 
-                filter
-                    .apply()
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                filter.apply()?;
 
                 Ok(())
             });

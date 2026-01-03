@@ -8,8 +8,8 @@
 use std::path::{Path, PathBuf};
 
 use landlock::{
-    make_bitflags, Access, AccessFs, AccessNet, BitFlags, NetPort, PathBeneath, PathFd, Ruleset,
-    RulesetAttr, RulesetCreated, RulesetCreatedAttr, RulesetStatus, ABI,
+    make_bitflags, Access, AccessFs, AccessNet, BitFlags, NetPort, PathBeneath, PathFd, RestrictSelfError,
+    Ruleset, RulesetAttr, RulesetCreated, RulesetCreatedAttr, RulesetError, RulesetStatus, ABI,
 };
 
 use crate::config::SandboxConfigData;
@@ -79,22 +79,30 @@ impl PreparedRuleset {
     /// Apply the ruleset to the current process (call in pre_exec)
     ///
     /// Fails fast if the ruleset is not fully enforced.
-    pub fn restrict_self(self) -> std::result::Result<(), String> {
-        let status = self
-            .inner
-            .restrict_self()
-            .map_err(|e| format!("Landlock restrict_self failed: {}", e))?;
+    pub fn restrict_self(self) -> std::io::Result<()> {
+        let status = self.inner.restrict_self().map_err(landlock_error_to_io)?;
 
         // Fast-fail if not fully enforced
         match status.ruleset {
             RulesetStatus::FullyEnforced => Ok(()),
             RulesetStatus::PartiallyEnforced => {
-                Err("Landlock rules only partially enforced - refusing to run with reduced security".to_string())
+                Err(std::io::Error::from_raw_os_error(libc::EPERM))
             }
             RulesetStatus::NotEnforced => {
-                Err("Landlock not enforced by kernel".to_string())
+                Err(std::io::Error::from_raw_os_error(libc::EPERM))
             }
         }
+    }
+}
+
+fn landlock_error_to_io(error: RulesetError) -> std::io::Error {
+    match error {
+        RulesetError::RestrictSelf(RestrictSelfError::SetNoNewPrivsCall { source })
+        | RulesetError::RestrictSelf(RestrictSelfError::RestrictSelfCall { source }) => source,
+        other => std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Landlock restrict_self failed: {other}"),
+        ),
     }
 }
 

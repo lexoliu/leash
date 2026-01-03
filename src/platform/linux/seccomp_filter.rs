@@ -22,9 +22,20 @@ pub struct PreparedFilter {
 
 impl PreparedFilter {
     /// Apply the filter to the current process (call in pre_exec)
-    pub fn apply(self) -> std::result::Result<(), String> {
-        seccompiler::apply_filter(&self.program)
-            .map_err(|e| format!("Seccomp apply_filter failed: {:?}", e))
+    pub fn apply(self) -> std::io::Result<()> {
+        seccompiler::apply_filter(&self.program).map_err(seccomp_error_to_io)
+    }
+}
+
+fn seccomp_error_to_io(error: seccompiler::Error) -> std::io::Error {
+    match error {
+        seccompiler::Error::Prctl(source) | seccompiler::Error::Seccomp(source) => source,
+        seccompiler::Error::EmptyFilter => std::io::Error::from_raw_os_error(libc::EINVAL),
+        seccompiler::Error::ThreadSync(_) => std::io::Error::from_raw_os_error(libc::EIO),
+        other => std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("Seccomp apply_filter failed: {other}"),
+        ),
     }
 }
 
