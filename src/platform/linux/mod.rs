@@ -17,6 +17,12 @@ const MIN_KERNEL_VERSION: KernelVersion = KernelVersion::new(6, 7, 0);
 /// Minimum required Landlock ABI version (v4 adds network restrictions)
 const MIN_LANDLOCK_ABI: i32 = 4;
 
+fn pre_exec_write(msg: &[u8]) {
+    unsafe {
+        libc::write(libc::STDERR_FILENO, msg.as_ptr() as *const _, msg.len());
+    }
+}
+
 /// Linux sandbox backend using Landlock (filesystem + network) and Seccomp (syscall filtering)
 pub struct LinuxBackend {
     _private: (),
@@ -303,9 +309,10 @@ impl LinuxBackend {
                     )
                 })?;
 
-                ruleset
-                    .restrict_self()
-                    ?;
+                if let Err(err) = ruleset.restrict_self() {
+                    pre_exec_write(b"leash: landlock restrict_self failed\n");
+                    return Err(err);
+                }
 
                 let filter = seccomp_filter.take().ok_or_else(|| {
                     std::io::Error::new(
@@ -314,7 +321,10 @@ impl LinuxBackend {
                     )
                 })?;
 
-                filter.apply()?;
+                if let Err(err) = filter.apply() {
+                    pre_exec_write(b"leash: seccomp apply failed\n");
+                    return Err(err);
+                }
 
                 Ok(())
             });
