@@ -4,23 +4,54 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**leash** is a cross-platform Rust library for running untrusted code in secure sandboxes with native OS-level isolation. Currently implements macOS via `sandbox-exec` with SBPL profiles; Linux (Landlock + Seccomp) and Windows (AppContainer) are declared but not yet implemented.
+**leash** is a cross-platform Rust library for running untrusted code in secure sandboxes with native OS-level isolation.
+
+Platform support:
+- **macOS**: `sandbox-exec` with SBPL profiles (fully implemented)
+- **Linux**: Landlock (ABI v4, kernel 6.7+) + Seccomp (implemented, requires kernel support)
+- **Windows**: AppContainer (declared but not yet implemented)
+
+## Workspace Structure
+
+```
+.
+├── Cargo.toml      # Main library (leash)
+├── cli/            # CLI tool (leash-cli) - `leash run`, `leash shell`, `leash python`
+├── ipc/            # IPC helper binary (leash-ipc) - CLI for sandboxed processes to call IPC commands
+└── nodejs/         # Node.js bindings via NAPI-RS (leash-nodejs)
+```
 
 ## Build Commands
 
 ```bash
-cargo build                          # Debug build
-cargo build --release                # Release build
-cargo test                           # Run all tests
-cargo run --example basic            # Run an example
-cargo run --example python_sandbox   # Python venv example
+cargo build                                  # Debug build (all workspace members)
+cargo build --release                        # Release build
+cargo test                                   # Run all tests
+cargo test -p leash                          # Run tests for main library only
+cargo test test_name                         # Run specific test by name
+cargo run --example basic                    # Run an example
+cargo run --example python_sandbox           # Python venv example
+RUST_LOG=debug cargo run --example basic     # With debug logging
 ```
+
+### CLI usage
+
+```bash
+cargo run -p leash-cli -- run echo hello     # Run command in sandbox
+cargo run -p leash-cli -- shell              # Interactive shell in sandbox
+cargo run -p leash-cli -- python script.py   # Run Python in sandbox with venv
+```
+
+### Platform-specific testing
+
+- **macOS**: Works out of the box, tests run directly
+- **Linux**: Requires kernel 6.7+ with Landlock ABI v4. CI uses ubuntu-24.04. Run `cargo run --example debug_sandbox` to test isolation
 
 ## Architecture
 
 ### Core Components
 
-- **Sandbox<N: NetworkPolicy>** (`src/sandbox.rs`) - Main entry point, generic over network policy. Manages lifecycle: creates backend, starts proxy, tracks child processes, cleans up on drop.
+- **Sandbox<N: NetworkPolicy>** (`src/sandbox.rs`) - Main entry point, generic over network policy. Manages lifecycle: creates backend, starts proxy and IPC server, tracks child processes, cleans up on drop.
 
 - **Command** (`src/command.rs`) - Builder for executing programs in sandbox. Automatically sets HTTP_PROXY/HTTPS_PROXY to route through sandbox proxy.
 
@@ -28,9 +59,11 @@ cargo run --example python_sandbox   # Python venv example
 
 - **NetworkPolicy** (`src/network/policy.rs`) - Trait for async network filtering. Implementations: `DenyAll` (default), `AllowAll`, `AllowList` (domain whitelist with wildcards), `CustomPolicy<F>`.
 
-- **Backend trait** (`src/platform/mod.rs`) - Platform-specific sandbox execution. MacOS implementation uses `sandbox-exec` with SBPL profiles generated from Askama templates.
+- **Backend trait** (`src/platform/mod.rs`) - Platform-specific sandbox execution. macOS uses `sandbox-exec` + SBPL templates (`templates/`); Linux uses Landlock + Seccomp applied via `pre_exec`.
 
 - **SecurityConfig** (`src/security.rs`) - Fine-grained protection toggles (protect_user_home, protect_credentials, protect_cloud_config, etc.) and hardware access flags (allow_gpu, allow_npu, allow_hardware).
+
+- **IpcRouter** (`src/ipc/`) - Type-safe IPC over Unix domain sockets with MessagePack. Sandboxed processes can call host-registered commands via `IpcCommand` trait.
 
 ### Key Patterns
 
@@ -39,24 +72,7 @@ cargo run --example python_sandbox   # Python venv example
 - **Compile-time templates**: SBPL profiles use Askama templates in `templates/`
 - **Executor agnostic**: Works with any `executor-core` compatible runtime (smol default, tokio via feature)
 - **Drop-based cleanup**: Sandbox drop kills child processes and removes working directory
-
-### Module Structure
-
-```
-src/
-├── lib.rs          # Public API re-exports
-├── sandbox.rs      # Sandbox struct and lifecycle
-├── command.rs      # Command builder
-├── config.rs       # Configuration builders
-├── security.rs     # SecurityConfig
-├── workdir.rs      # Random-named working directories
-├── platform/       # OS-specific backends
-│   └── macos/      # sandbox-exec + SBPL
-├── network/        # Proxy and policies
-│   ├── policy.rs   # NetworkPolicy trait
-│   └── proxy.rs    # HTTP proxy implementation
-└── python/         # VenvManager for Python integration
-```
+- **pre_exec sandbox application**: On Linux, Landlock and Seccomp are applied in `pre_exec` hook after fork, before exec
 
 ## Code Standards
 
