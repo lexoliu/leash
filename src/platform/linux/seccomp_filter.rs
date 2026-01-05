@@ -244,14 +244,8 @@ fn add_socket_restrictions(
 
 /// Block syscalls that are dangerous for sandboxed processes
 fn add_dangerous_syscall_blocks(rules: &mut BTreeMap<i64, Vec<SeccompRule>>) -> Result<()> {
-    // Create an "always true" condition using MaskedEq(0) with value 0
-    // This evaluates to (arg0 & 0) == 0, which is always true regardless of arg0's value
-    let always_true_condition =
-        SeccompCondition::new(0, SeccompCmpArgLen::Qword, SeccompCmpOp::MaskedEq(0), 0)
-            .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?;
-    let block_rule = SeccompRule::new(vec![always_true_condition])
-        .map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?;
-    let block_always = || vec![block_rule.clone()];
+    // Empty rule chains match on syscall number only.
+    let block_always = || Vec::new();
 
     // Process debugging and manipulation
     rules.insert(libc::SYS_ptrace, block_always());
@@ -324,13 +318,8 @@ fn add_dangerous_syscall_blocks(rules: &mut BTreeMap<i64, Vec<SeccompRule>>) -> 
 
 /// Restrict hardware-related syscalls when allow_hardware is false
 fn add_hardware_restrictions(rules: &mut BTreeMap<i64, Vec<SeccompRule>>) -> Result<()> {
-    // Create an "always true" condition using MaskedEq(0) with value 0
-    let always_true_condition =
-        SeccompCondition::new(0, SeccompCmpArgLen::Qword, SeccompCmpOp::MaskedEq(0), 0)
-            .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?;
-    let block_rule = SeccompRule::new(vec![always_true_condition])
-        .map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?;
-    let block_always = || vec![block_rule.clone()];
+    // Empty rule chains match on syscall number only.
+    let block_always = || Vec::new();
 
     // io_uring (powerful async I/O, can be used in exploits)
     rules.insert(libc::SYS_io_uring_setup, block_always());
