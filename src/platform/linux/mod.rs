@@ -311,7 +311,14 @@ impl LinuxBackend {
 
                 if let Err(err) = ruleset.restrict_self() {
                     pre_exec_write(b"leash: landlock restrict_self failed\n");
-                    return Err(err);
+                    let errno = err
+                        .raw_os_error()
+                        .map(|code| format!(" (errno {code})"))
+                        .unwrap_or_default();
+                    return Err(std::io::Error::new(
+                        err.kind(),
+                        format!("landlock restrict_self failed: {err}{errno}"),
+                    ));
                 }
 
                 let filter = seccomp_filter.take().ok_or_else(|| {
@@ -323,7 +330,14 @@ impl LinuxBackend {
 
                 if let Err(err) = filter.apply() {
                     pre_exec_write(b"leash: seccomp apply failed\n");
-                    return Err(err);
+                    let errno = err
+                        .raw_os_error()
+                        .map(|code| format!(" (errno {code})"))
+                        .unwrap_or_default();
+                    return Err(std::io::Error::new(
+                        err.kind(),
+                        format!("seccomp apply failed: {err}{errno}"),
+                    ));
                 }
 
                 Ok(())
