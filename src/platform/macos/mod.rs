@@ -45,16 +45,17 @@ impl MacOSBackend {
             )));
         }
 
-        let major: u32 = parts[0].parse().map_err(|_| {
-            Error::InitFailed(format!("Invalid major version: {}", parts[0]))
-        })?;
-        let minor: u32 = parts[1].parse().map_err(|_| {
-            Error::InitFailed(format!("Invalid minor version: {}", parts[1]))
-        })?;
+        let major: u32 = parts[0]
+            .parse()
+            .map_err(|_| Error::InitFailed(format!("Invalid major version: {}", parts[0])))?;
+        let minor: u32 = parts[1]
+            .parse()
+            .map_err(|_| Error::InitFailed(format!("Invalid minor version: {}", parts[1])))?;
 
         Ok((major, minor))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_command(
         &self,
         config: &SandboxConfigData,
@@ -119,7 +120,17 @@ impl Backend for MacOSBackend {
     ) -> Result<Output> {
         tracing::debug!(program = %program, args = ?args, "sandbox: executing command");
 
-        let mut cmd = self.build_command(config, proxy_port, program, args, envs, current_dir, stdin, stdout, stderr)?;
+        let mut cmd = self.build_command(
+            config,
+            proxy_port,
+            program,
+            args,
+            envs,
+            current_dir,
+            stdin,
+            stdout,
+            stderr,
+        )?;
 
         let output = cmd.output()?;
 
@@ -147,7 +158,17 @@ impl Backend for MacOSBackend {
     ) -> Result<Child> {
         tracing::debug!(program = %program, args = ?args, "sandbox: spawning command");
 
-        let mut cmd = self.build_command(config, proxy_port, program, args, envs, current_dir, stdin, stdout, stderr)?;
+        let mut cmd = self.build_command(
+            config,
+            proxy_port,
+            program,
+            args,
+            envs,
+            current_dir,
+            stdin,
+            stdout,
+            stderr,
+        )?;
 
         let child = cmd.spawn()?;
 

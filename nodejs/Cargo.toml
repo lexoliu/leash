@@ -38,3 +38,5 @@ napi-build = "2"
 [profile.release]
 lto = true
 strip = "symbols"
+[package.metadata.cargo-machete]
+ignored = ["serde", "serde_json", "thiserror", "tracing"]

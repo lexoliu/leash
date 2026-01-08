@@ -1,5 +1,6 @@
 //! Wire protocol types for IPC
-//!
+#![allow(dead_code)]
+
 //! Wire format:
 //! ```text
 //! Request:
@@ -79,7 +80,9 @@ impl IpcRequest {
     pub fn to_bytes<T: Serialize>(method: &str, params: &T) -> Result<Vec<u8>, IpcError> {
         let method_bytes = method.as_bytes();
         if method_bytes.len() > 255 {
-            return Err(IpcError::InvalidProtocol("method name too long".to_string()));
+            return Err(IpcError::InvalidProtocol(
+                "method name too long".to_string(),
+            ));
         }
 
         let params_bytes = rmp_serde::to_vec(params)?;

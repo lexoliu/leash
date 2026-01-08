@@ -113,6 +113,7 @@ impl Child {
 /// Internal trait for platform-specific sandbox backends
 pub(crate) trait Backend: Sized + Send + Sync {
     /// Execute a command and wait for completion
+    #[allow(clippy::too_many_arguments)]
     fn execute(
         &self,
         config: &SandboxConfigData,
@@ -127,6 +128,7 @@ pub(crate) trait Backend: Sized + Send + Sync {
     ) -> impl Future<Output = Result<Output>> + Send;
 
     /// Spawn a command as a child process
+    #[allow(clippy::too_many_arguments)]
     fn spawn(
         &self,
         config: &SandboxConfigData,

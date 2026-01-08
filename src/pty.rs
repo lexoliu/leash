@@ -9,10 +9,10 @@ use std::time::Duration;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use polling::{Event, Events, Poller};
 
+use crate::NetworkPolicy;
 use crate::config::SandboxConfigData;
 use crate::error::{Error, Result};
 use crate::network::NetworkProxy;
-use crate::NetworkPolicy;
 
 /// Result of running a command with PTY
 pub struct PtyExitStatus {
@@ -139,9 +139,11 @@ fn run_io_loop(pty: &mut pty_process::blocking::Pty, child: &mut Child) -> Resul
     let pty_borrowed = unsafe { BorrowedFd::borrow_raw(pty_fd) };
 
     unsafe {
+        #[allow(clippy::needless_borrows_for_generic_args)]
         poller
             .add(&stdin_borrowed, Event::readable(STDIN_KEY))
             .map_err(|e| Error::PtyError(format!("Failed to add stdin to poller: {}", e)))?;
+        #[allow(clippy::needless_borrows_for_generic_args)]
         poller
             .add(&pty_borrowed, Event::readable(PTY_KEY))
             .map_err(|e| Error::PtyError(format!("Failed to add PTY to poller: {}", e)))?;
@@ -166,7 +168,7 @@ fn run_io_loop(pty: &mut pty_process::blocking::Pty, child: &mut Child) -> Resul
                 return Err(Error::PtyError(format!(
                     "Failed to check child status: {}",
                     e
-                )))
+                )));
             }
         }
 
@@ -195,6 +197,7 @@ fn run_io_loop(pty: &mut pty_process::blocking::Pty, child: &mut Child) -> Resul
                         Err(_) => stdin_eof = true,
                     }
                     if !stdin_eof {
+                        #[allow(clippy::needless_borrows_for_generic_args)]
                         poller
                             .modify(&stdin_borrowed, Event::readable(STDIN_KEY))
                             .ok();
@@ -231,9 +234,8 @@ fn run_io_loop(pty: &mut pty_process::blocking::Pty, child: &mut Child) -> Resul
                             });
                         }
                     }
-                    poller
-                        .modify(&pty_borrowed, Event::readable(PTY_KEY))
-                        .ok();
+                    #[allow(clippy::needless_borrows_for_generic_args)]
+                    poller.modify(&pty_borrowed, Event::readable(PTY_KEY)).ok();
                 }
                 _ => {}
             }

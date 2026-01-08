@@ -3,20 +3,21 @@
 //! Unix domain socket server for handling IPC requests from sandboxed processes.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_net::unix::UnixListener;
 use executor_core::{Executor, Task};
-use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 use futures_lite::StreamExt;
+use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::ipc::protocol::{IpcError, IpcRequest, IpcResponse};
 use crate::ipc::router::IpcRouter;
 
 /// IPC server that listens on a Unix domain socket
 pub struct IpcServer {
+    #[allow(dead_code)]
     router: Arc<IpcRouter>,
     socket_path: PathBuf,
     running: Arc<AtomicBool>,
@@ -61,7 +62,12 @@ impl IpcServer {
         let router_clone = Arc::clone(&router);
         let running_clone = Arc::clone(&running);
         executor
-            .spawn(run_server(listener, router_clone, running_clone, executor.clone()))
+            .spawn(run_server(
+                listener,
+                router_clone,
+                running_clone,
+                executor.clone(),
+            ))
             .detach();
 
         Ok(server)
@@ -97,14 +103,11 @@ async fn run_server<E: Executor + Clone + 'static>(
     let mut incoming = listener.incoming();
 
     while running.load(Ordering::SeqCst) {
-        let accept_result = futures_lite::future::or(
-            async { incoming.next().await },
-            async {
-                futures_lite::future::yield_now().await;
-                async_io::Timer::after(Duration::from_millis(100)).await;
-                None
-            },
-        )
+        let accept_result = futures_lite::future::or(async { incoming.next().await }, async {
+            futures_lite::future::yield_now().await;
+            async_io::Timer::after(Duration::from_millis(100)).await;
+            None
+        })
         .await;
 
         match accept_result {

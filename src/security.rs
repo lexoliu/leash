@@ -130,17 +130,9 @@ impl SecurityConfig {
 }
 
 /// Builder for SecurityConfig
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SecurityConfigBuilder {
     config: SecurityConfig,
-}
-
-impl Default for SecurityConfigBuilder {
-    fn default() -> Self {
-        Self {
-            config: SecurityConfig::strict(),
-        }
-    }
 }
 
 impl SecurityConfigBuilder {

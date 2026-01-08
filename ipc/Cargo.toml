@@ -17,3 +17,5 @@ clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rmp-serde = "1"
+[package.metadata.cargo-machete]
+ignored = ["serde", "serde_json", "thiserror", "tracing"]
