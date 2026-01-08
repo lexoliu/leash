@@ -25,6 +25,10 @@
 pub struct SecurityConfig {
     /// Protect user home directories (/Users, /home)
     pub protect_user_home: bool,
+    /// Allow macOS TCC prompts for protected folders (Desktop, Documents, Downloads, etc.)
+    /// When true, TCC-protected folders are not blocked at sandbox level, letting macOS prompt.
+    /// When false (strict mode), these folders are blocked at sandbox level without prompts.
+    pub allow_tcc_prompts: bool,
     /// Protect SSH/GPG credentials (.ssh, .gnupg)
     pub protect_credentials: bool,
     /// Protect cloud provider config (.aws, .kube, .docker)
@@ -58,11 +62,13 @@ impl SecurityConfig {
     /// Strict preset - maximum protection (default)
     ///
     /// All sensitive data protection is enabled.
+    /// TCC prompts are disabled (sandbox blocks TCC-protected folders).
     /// GPU and NPU access allowed (essential for ML workloads).
     /// General hardware access is disabled.
     pub fn strict() -> Self {
         Self {
             protect_user_home: true,
+            allow_tcc_prompts: false,
             protect_credentials: true,
             protect_cloud_config: true,
             protect_browser_data: true,
@@ -78,11 +84,13 @@ impl SecurityConfig {
     /// Permissive preset - minimal restrictions
     ///
     /// Use when you fully trust the sandboxed code.
+    /// TCC prompts are enabled (macOS will prompt for protected folders).
     /// Logging still works for audit purposes.
     /// All hardware access is allowed.
     pub fn permissive() -> Self {
         Self {
             protect_user_home: false,
+            allow_tcc_prompts: true,
             protect_credentials: false,
             protect_cloud_config: false,
             protect_browser_data: false,
@@ -92,6 +100,26 @@ impl SecurityConfig {
             allow_gpu: true,
             allow_npu: true,
             allow_hardware: true,
+        }
+    }
+
+    /// Interactive preset - suitable for CLI tools with user interaction
+    ///
+    /// Protects sensitive credentials but allows TCC prompts for user folders.
+    /// User can approve/deny access to Desktop, Documents, Downloads, etc. via macOS dialogs.
+    pub fn interactive() -> Self {
+        Self {
+            protect_user_home: true,
+            allow_tcc_prompts: true,
+            protect_credentials: true,
+            protect_cloud_config: true,
+            protect_browser_data: true,
+            protect_keychain: true,
+            protect_shell_history: true,
+            protect_package_credentials: true,
+            allow_gpu: true,
+            allow_npu: true,
+            allow_hardware: false,
         }
     }
 
@@ -126,6 +154,15 @@ impl SecurityConfigBuilder {
     /// Protect user home directories
     pub fn protect_user_home(mut self, enabled: bool) -> Self {
         self.config.protect_user_home = enabled;
+        self
+    }
+
+    /// Allow macOS TCC prompts for protected folders
+    ///
+    /// When enabled, TCC-protected folders (Desktop, Documents, Downloads, etc.)
+    /// are not blocked at sandbox level, letting macOS prompt the user.
+    pub fn allow_tcc_prompts(mut self, enabled: bool) -> Self {
+        self.config.allow_tcc_prompts = enabled;
         self
     }
 
@@ -198,6 +235,7 @@ mod tests {
         let config = SecurityConfig::strict();
 
         assert!(config.protect_user_home);
+        assert!(!config.allow_tcc_prompts); // Strict blocks TCC folders
         assert!(config.protect_credentials);
         assert!(config.protect_cloud_config);
         assert!(config.protect_browser_data);
@@ -214,6 +252,7 @@ mod tests {
         let config = SecurityConfig::permissive();
 
         assert!(!config.protect_user_home);
+        assert!(config.allow_tcc_prompts); // Permissive allows TCC prompts
         assert!(!config.protect_credentials);
         assert!(!config.protect_cloud_config);
         assert!(!config.protect_browser_data);
@@ -223,6 +262,23 @@ mod tests {
         assert!(config.allow_gpu);
         assert!(config.allow_npu);
         assert!(config.allow_hardware);
+    }
+
+    #[test]
+    fn test_interactive_allows_tcc_prompts() {
+        let config = SecurityConfig::interactive();
+
+        assert!(config.protect_user_home);
+        assert!(config.allow_tcc_prompts); // Interactive allows TCC prompts
+        assert!(config.protect_credentials);
+        assert!(config.protect_cloud_config);
+        assert!(config.protect_browser_data);
+        assert!(config.protect_keychain);
+        assert!(config.protect_shell_history);
+        assert!(config.protect_package_credentials);
+        assert!(config.allow_gpu);
+        assert!(config.allow_npu);
+        assert!(!config.allow_hardware);
     }
 
     #[test]

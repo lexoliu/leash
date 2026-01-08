@@ -32,7 +32,7 @@ impl PtyExitStatus {
 /// Run a command in a PTY within the sandbox
 pub fn run_with_pty<N: NetworkPolicy>(
     config: &SandboxConfigData,
-    proxy: &NetworkProxy<N>,
+    proxy: Option<&NetworkProxy<N>>,
     program: &str,
     args: &[String],
     envs: &[(String, String)],
@@ -46,9 +46,10 @@ pub fn run_with_pty<N: NetworkPolicy>(
         let _ = pty.resize(pty_process::Size::new(rows, cols));
     }
 
-    let sbpl_profile = crate::platform::macos::generate_profile(config, proxy.addr().port())?;
+    let proxy_port = proxy.map(|proxy| proxy.addr().port()).unwrap_or(0);
+    let sbpl_profile = crate::platform::macos::generate_profile(config, proxy_port)?;
     let work_dir = current_dir.unwrap_or(config.working_dir());
-    let proxy_url = proxy.proxy_url();
+    let proxy_url = proxy.map(|proxy| proxy.proxy_url());
 
     // Build command with chained methods (consuming builder pattern)
     let mut cmd = pty_process::blocking::Command::new("/usr/bin/sandbox-exec")
@@ -78,12 +79,14 @@ pub fn run_with_pty<N: NetworkPolicy>(
         }
     }
 
-    // Set proxy environment variables
-    cmd = cmd
-        .env("HTTP_PROXY", &proxy_url)
-        .env("HTTPS_PROXY", &proxy_url)
-        .env("http_proxy", &proxy_url)
-        .env("https_proxy", &proxy_url);
+    if let Some(ref proxy_url) = proxy_url {
+        // Set proxy environment variables
+        cmd = cmd
+            .env("HTTP_PROXY", proxy_url)
+            .env("HTTPS_PROXY", proxy_url)
+            .env("http_proxy", proxy_url)
+            .env("https_proxy", proxy_url);
+    }
 
     for (key, val) in envs {
         cmd = cmd.env(key, val);

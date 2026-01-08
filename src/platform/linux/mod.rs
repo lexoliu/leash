@@ -302,6 +302,9 @@ impl LinuxBackend {
 
         unsafe {
             cmd.pre_exec(move || {
+                #[cfg(debug_assertions)]
+                pre_exec_write(b"leash: pre_exec start\n");
+
                 let ruleset = landlock_ruleset.take().ok_or_else(|| {
                     std::io::Error::new(
                         std::io::ErrorKind::Other,
@@ -321,6 +324,9 @@ impl LinuxBackend {
                     ));
                 }
 
+                #[cfg(debug_assertions)]
+                pre_exec_write(b"leash: landlock applied\n");
+
                 let filter = seccomp_filter.take().ok_or_else(|| {
                     std::io::Error::new(
                         std::io::ErrorKind::Other,
@@ -339,6 +345,9 @@ impl LinuxBackend {
                         format!("seccomp apply failed: {err}{errno}"),
                     ));
                 }
+
+                #[cfg(debug_assertions)]
+                pre_exec_write(b"leash: seccomp applied\n");
 
                 Ok(())
             });

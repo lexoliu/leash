@@ -2,11 +2,51 @@
 (deny default)
 
 ; =============================================================================
-; Mach IPC - Required for process execution
+; Mach IPC - Minimal services required for process execution
 ; =============================================================================
-; Allow mach-lookup for system services (required for process execution)
-; This is more permissive than individual services but needed for compatibility
-(allow mach-lookup)
+; Core system services for process execution and basic operations
+(allow mach-lookup (global-name "com.apple.system.opendirectoryd.libinfo"))  ; User/group lookups
+(allow mach-lookup (global-name "com.apple.system.logger"))                   ; Unified logging
+(allow mach-lookup (global-name "com.apple.system.notification_center"))      ; Notifications
+
+; Security and code signing
+(allow mach-lookup (global-name "com.apple.SecurityServer"))                  ; Code signing verification
+(allow mach-lookup (global-name "com.apple.trustd"))                          ; Certificate validation
+(allow mach-lookup (global-name "com.apple.trustd.agent"))                    ; Trust agent
+
+; Launch Services and Core Services
+(allow mach-lookup (global-name "com.apple.lsd.mapdb"))                       ; Launch Services database
+(allow mach-lookup (global-name "com.apple.coreservices.launchservicesd"))    ; Launch Services daemon
+(allow mach-lookup (global-name "com.apple.CoreServices.coreservicesd"))      ; Core Services
+(allow mach-lookup (global-name "com.apple.coreservices.quarantine-resolver")) ; Quarantine handling
+
+; Process lifecycle and preferences
+(allow mach-lookup (global-name "com.apple.runningboard"))                    ; Process management
+(allow mach-lookup (global-name "com.apple.cfprefsd.daemon"))                 ; System preferences
+(allow mach-lookup (global-name "com.apple.cfprefsd.agent"))                  ; User preferences
+
+; Dynamic linker
+(allow mach-lookup (global-name "com.apple.dyld.closured"))                   ; dyld closure daemon
+
+; XPC and launchd services (pattern match for essential XPC)
+(allow mach-lookup (global-name-prefix "com.apple.xpc."))                     ; XPC services
+
+; Distributed notifications (various versions)
+(allow mach-lookup (global-name "com.apple.distributed_notifications@1v3"))
+(allow mach-lookup (global-name "com.apple.distributed_notifications@Vv3"))
+
+; Network configuration (required for proxy)
+(allow mach-lookup (global-name "com.apple.SystemConfiguration.configd"))     ; Network config
+(allow mach-lookup (global-name "com.apple.networkd"))                        ; Network daemon
+(allow mach-lookup (global-name "com.apple.symptomsd"))                       ; Network diagnostics
+(allow mach-lookup (global-name "com.apple.dnssd.service"))                   ; DNS service discovery
+
+; File system events (needed by many tools)
+(allow mach-lookup (global-name "com.apple.FSEvents"))                        ; FS event notifications
+
+; Font services (needed by many applications)
+(allow mach-lookup (global-name "com.apple.fonts"))
+(allow mach-lookup (global-name "com.apple.FontObjectsServer"))
 
 ; Sysctl for system information
 (allow sysctl-read)
@@ -157,61 +197,74 @@
 {% endif %}
 
 ; =============================================================================
-; Network: only allow connections to the sandbox proxy port
+; Network: deny by default; optionally allow proxy port
 ; =============================================================================
 (deny network*)
-(allow network* (remote ip "localhost:{{ proxy_port }}"))
+; Always allow local Unix sockets for IPC (sandboxed processes need to talk to host)
 (allow network* (local unix-socket))
+{% if !network_deny_all %}
+; Allow outbound network through proxy when network mode is enabled
+(allow network* (remote ip "localhost:{{ proxy_port }}"))
+{% endif %}
 
 ; =============================================================================
 ; Security rules - DENY sensitive paths
-; These use regex to match paths regardless of where they appear
+; Patterns are anchored to match directory/file boundaries to avoid false matches
+; e.g., "/\.ssh(/|$)" matches "/.ssh/" or "/.ssh" at end, not "not.ssh.txt"
 ; =============================================================================
 {% if protect_user_home %}
-; Protect user home directories - specific sensitive subdirectories
-(deny file-read* (regex #"/Users/[^/]+/Documents") (with no-log))
-(deny file-read* (regex #"/Users/[^/]+/Desktop") (with no-log))
-(deny file-read* (regex #"/Users/[^/]+/Downloads") (with no-log))
-(deny file-read* (regex #"/Users/[^/]+/Library") (with no-log))
-(deny file-read* (regex #"/Users/[^/]+/Pictures") (with no-log))
-(deny file-read* (regex #"/Users/[^/]+/Movies") (with no-log))
-(deny file-read* (regex #"/Users/[^/]+/Music") (with no-log))
+; Protect user home directories
+{% if allow_tcc_prompts %}
+; TCC prompts enabled - only block ~/Library (not TCC-protected)
+; TCC-protected folders (Desktop, Documents, Downloads, Pictures, Movies, Music)
+; are handled by macOS TCC, which will prompt the user for access
+(deny file-read* (regex #"/Users/[^/]+/Library(/|$)") (with no-log))
+{% else %}
+; TCC prompts disabled (strict mode) - block all sensitive home subdirectories
+(deny file-read* (regex #"/Users/[^/]+/Documents(/|$)") (with no-log))
+(deny file-read* (regex #"/Users/[^/]+/Desktop(/|$)") (with no-log))
+(deny file-read* (regex #"/Users/[^/]+/Downloads(/|$)") (with no-log))
+(deny file-read* (regex #"/Users/[^/]+/Library(/|$)") (with no-log))
+(deny file-read* (regex #"/Users/[^/]+/Pictures(/|$)") (with no-log))
+(deny file-read* (regex #"/Users/[^/]+/Movies(/|$)") (with no-log))
+(deny file-read* (regex #"/Users/[^/]+/Music(/|$)") (with no-log))
+{% endif %}
 {% endif %}
 {% if protect_credentials %}
-; Protect SSH/GPG credentials
-(deny file-read* (regex #"\.ssh") (with no-log))
-(deny file-read* (regex #"\.gnupg") (with no-log))
+; Protect SSH/GPG credentials - anchored to directory boundaries
+(deny file-read* (regex #"/\.ssh(/|$)") (with no-log))
+(deny file-read* (regex #"/\.gnupg(/|$)") (with no-log))
 {% endif %}
 {% if protect_cloud_config %}
-; Protect cloud provider configurations
-(deny file-read* (regex #"\.aws") (with no-log))
-(deny file-read* (regex #"\.kube") (with no-log))
-(deny file-read* (regex #"\.docker") (with no-log))
-(deny file-read* (regex #"\.gcloud") (with no-log))
-(deny file-read* (regex #"\.azure") (with no-log))
+; Protect cloud provider configurations - anchored to directory boundaries
+(deny file-read* (regex #"/\.aws(/|$)") (with no-log))
+(deny file-read* (regex #"/\.kube(/|$)") (with no-log))
+(deny file-read* (regex #"/\.docker(/|$)") (with no-log))
+(deny file-read* (regex #"/\.gcloud(/|$)") (with no-log))
+(deny file-read* (regex #"/\.azure(/|$)") (with no-log))
 {% endif %}
 {% if protect_browser_data %}
-; Protect browser data (cookies, history, passwords)
-(deny file-read* (regex #"Library/Application Support/Google/Chrome") (with no-log))
-(deny file-read* (regex #"Library/Application Support/Firefox") (with no-log))
-(deny file-read* (regex #"Library/Application Support/Microsoft Edge") (with no-log))
-(deny file-read* (regex #"Library/Safari") (with no-log))
-(deny file-read* (regex #"Library/Cookies") (with no-log))
+; Protect browser data (cookies, history, passwords) - anchored patterns
+(deny file-read* (regex #"/Library/Application Support/Google/Chrome(/|$)") (with no-log))
+(deny file-read* (regex #"/Library/Application Support/Firefox(/|$)") (with no-log))
+(deny file-read* (regex #"/Library/Application Support/Microsoft Edge(/|$)") (with no-log))
+(deny file-read* (regex #"/Library/Safari(/|$)") (with no-log))
+(deny file-read* (regex #"/Library/Cookies(/|$)") (with no-log))
 {% endif %}
 {% if protect_keychain %}
-; Protect system keychain
-(deny file-read* (regex #"Library/Keychains") (with no-log))
+; Protect system keychain - anchored pattern
+(deny file-read* (regex #"/Library/Keychains(/|$)") (with no-log))
 {% endif %}
 {% if protect_shell_history %}
-; Protect shell history files
-(deny file-read* (regex #"\.(bash|zsh|fish)_history") (with no-log))
-(deny file-read* (regex #"\.local/share/fish/fish_history") (with no-log))
+; Protect shell history files - anchored to match specific filenames
+(deny file-read* (regex #"/\.(bash_history|zsh_history|fish_history)$") (with no-log))
+(deny file-read* (regex #"/\.local/share/fish/fish_history$") (with no-log))
 {% endif %}
 {% if protect_package_credentials %}
-; Protect package manager credentials
-(deny file-read* (regex #"\.netrc") (with no-log))
-(deny file-read* (regex #"\.npmrc") (with no-log))
-(deny file-read* (regex #"\.pypirc") (with no-log))
-(deny file-read* (regex #"\.cargo/credentials") (with no-log))
-(deny file-read* (regex #"\.gem/credentials") (with no-log))
+; Protect package manager credentials - anchored to file boundaries
+(deny file-read* (regex #"/\.netrc$") (with no-log))
+(deny file-read* (regex #"/\.npmrc$") (with no-log))
+(deny file-read* (regex #"/\.pypirc$") (with no-log))
+(deny file-read* (regex #"/\.cargo/credentials(\.toml)?$") (with no-log))
+(deny file-read* (regex #"/\.gem/credentials$") (with no-log))
 {% endif %}

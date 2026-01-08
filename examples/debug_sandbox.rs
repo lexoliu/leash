@@ -1,28 +1,26 @@
 //! Debug sandbox to identify the issue
 
-use leash::{DenyAll, Sandbox};
+use leash::{AllowAll, Sandbox, SandboxConfig};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
 
     println!("Creating sandbox...");
-    let sandbox = smol::block_on(Sandbox::<DenyAll>::new())?;
+    let config = SandboxConfig::builder().network(AllowAll).build()?;
+    let sandbox = smol::block_on(Sandbox::with_config(config))?;
     println!("Sandbox created at: {:?}", sandbox.working_dir());
 
-    println!("\nRunning simple 'echo' command...");
-    let output = smol::block_on(sandbox.command("echo").args(["hello"]).output());
-
-    match output {
-        Ok(out) => {
-            println!("Success!");
-            println!("Exit code: {:?}", out.status.code());
-            println!("Stdout: {}", String::from_utf8_lossy(&out.stdout));
-            println!("Stderr: {}", String::from_utf8_lossy(&out.stderr));
-        }
+    println!("\nRunning simple 'echo' command (stdout/stderr inherited)...");
+    let status = match smol::block_on(sandbox.command("echo").args(["hello"]).status()) {
+        Ok(status) => status,
         Err(e) => {
-            println!("Failed: {:?}", e);
+            eprintln!("Failed: {:?}", e);
+            return Err(e.into());
         }
-    }
+    };
+
+    println!("Success!");
+    println!("Exit code: {:?}", status.code());
 
     Ok(())
 }

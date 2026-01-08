@@ -71,41 +71,56 @@ fn build_payload(cli: &Cli) -> Result<Vec<u8>, String> {
             serde_json::from_str(json_str).map_err(|e| format!("invalid JSON: {e}"))?;
         rmp_serde::to_vec(&value).map_err(|e| format!("serialization failed: {e}"))
     } else if !cli.args.is_empty() {
-        // Parse key-value pairs from trailing args
-        let mut map: HashMap<String, serde_json::Value> = HashMap::new();
-        let mut i = 0;
+        // Check if first arg starts with "--" (key-value mode) or not (positional mode)
+        let first_is_flag = cli.args.first().map(|s| s.starts_with("--")).unwrap_or(false);
 
-        while i < cli.args.len() {
-            let arg = &cli.args[i];
-            if arg.starts_with("--") {
-                let key = arg.trim_start_matches("--");
-                if i + 1 < cli.args.len() && !cli.args[i + 1].starts_with("--") {
-                    let value = &cli.args[i + 1];
-                    // Try to parse as number or boolean, otherwise use string
-                    let json_value = if let Ok(n) = value.parse::<i64>() {
-                        serde_json::Value::Number(n.into())
-                    } else if let Ok(n) = value.parse::<f64>() {
-                        serde_json::json!(n)
-                    } else if value == "true" {
-                        serde_json::Value::Bool(true)
-                    } else if value == "false" {
-                        serde_json::Value::Bool(false)
+        if first_is_flag {
+            // Parse key-value pairs from trailing args
+            let mut map: HashMap<String, serde_json::Value> = HashMap::new();
+            let mut i = 0;
+
+            while i < cli.args.len() {
+                let arg = &cli.args[i];
+                if arg.starts_with("--") {
+                    let key = arg.trim_start_matches("--");
+                    if i + 1 < cli.args.len() && !cli.args[i + 1].starts_with("--") {
+                        let value = &cli.args[i + 1];
+                        // Try to parse as number or boolean, otherwise use string
+                        let json_value = if let Ok(n) = value.parse::<i64>() {
+                            serde_json::Value::Number(n.into())
+                        } else if let Ok(n) = value.parse::<f64>() {
+                            serde_json::json!(n)
+                        } else if value == "true" {
+                            serde_json::Value::Bool(true)
+                        } else if value == "false" {
+                            serde_json::Value::Bool(false)
+                        } else {
+                            serde_json::Value::String(value.clone())
+                        };
+                        map.insert(key.to_string(), json_value);
+                        i += 2;
                     } else {
-                        serde_json::Value::String(value.clone())
-                    };
-                    map.insert(key.to_string(), json_value);
-                    i += 2;
+                        // Flag without value, treat as boolean true
+                        map.insert(key.to_string(), serde_json::Value::Bool(true));
+                        i += 1;
+                    }
                 } else {
-                    // Flag without value, treat as boolean true
-                    map.insert(key.to_string(), serde_json::Value::Bool(true));
-                    i += 1;
+                    return Err(format!("unexpected argument: {arg}"));
                 }
-            } else {
-                return Err(format!("unexpected argument: {arg}"));
             }
-        }
 
-        rmp_serde::to_vec(&map).map_err(|e| format!("serialization failed: {e}"))
+            rmp_serde::to_vec(&map).map_err(|e| format!("serialization failed: {e}"))
+        } else {
+            // Positional mode: pass all args as "args" array
+            let args_array: Vec<serde_json::Value> = cli
+                .args
+                .iter()
+                .map(|s| serde_json::Value::String(s.clone()))
+                .collect();
+            let mut map: HashMap<String, serde_json::Value> = HashMap::new();
+            map.insert("args".to_string(), serde_json::Value::Array(args_array));
+            rmp_serde::to_vec(&map).map_err(|e| format!("serialization failed: {e}"))
+        }
     } else {
         // Empty payload
         rmp_serde::to_vec(&serde_json::json!({})).map_err(|e| format!("serialization failed: {e}"))

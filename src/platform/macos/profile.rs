@@ -17,8 +17,10 @@ struct SandboxProfile {
     working_dir: String,
     python_venv_path: Option<String>,
     filesystem_strict: bool,
+    network_deny_all: bool,
     // Security protection flags
     protect_user_home: bool,
+    allow_tcc_prompts: bool,
     protect_credentials: bool,
     protect_cloud_config: bool,
     protect_browser_data: bool,
@@ -34,8 +36,8 @@ struct SandboxProfile {
 
 /// Generate an SBPL profile from sandbox configuration
 ///
-/// All sandboxed processes are restricted to connecting only to the proxy port.
-/// Network traffic must go through the sandbox's proxy for filtering and logging.
+/// If network is enabled, sandboxed processes are restricted to connecting only to the proxy port.
+/// When network is disabled, all network access is denied.
 pub fn generate_profile(config: &SandboxConfigData, proxy_port: u16) -> Result<String> {
     // Log the configuration
     tracing::debug!("sandbox policy: deny all by default");
@@ -58,10 +60,14 @@ pub fn generate_profile(config: &SandboxConfigData, proxy_port: u16) -> Result<S
         tracing::debug!(path = %python_config.venv().path().display(), "sandbox: allow python venv");
     }
 
-    tracing::debug!(
-        proxy_port = proxy_port,
-        "sandbox: network restricted to proxy port only"
-    );
+    if config.network_deny_all() {
+        tracing::debug!("sandbox: network disabled");
+    } else {
+        tracing::debug!(
+            proxy_port = proxy_port,
+            "sandbox: network restricted to proxy port only"
+        );
+    }
 
     let security = config.security();
     if security.allow_gpu {
@@ -94,8 +100,10 @@ pub fn generate_profile(config: &SandboxConfigData, proxy_port: u16) -> Result<S
         working_dir: escape_path(config.working_dir()),
         python_venv_path: config.python().map(|p| escape_path(p.venv().path())),
         filesystem_strict: config.filesystem_strict(),
+        network_deny_all: config.network_deny_all(),
         // Security protection flags
         protect_user_home: security.protect_user_home,
+        allow_tcc_prompts: security.allow_tcc_prompts,
         protect_credentials: security.protect_credentials,
         protect_cloud_config: security.protect_cloud_config,
         protect_browser_data: security.protect_browser_data,
@@ -159,6 +167,7 @@ fn escape_path(path: &Path) -> String {
 mod tests {
     use super::*;
     use crate::config::SandboxConfig;
+    use crate::network::AllowAll;
     use crate::network::DenyAll;
 
     #[test]
@@ -171,8 +180,22 @@ mod tests {
         assert!(profile.contains("(version 1)"));
         assert!(profile.contains("(deny default)"));
         assert!(profile.contains("(deny network*)"));
-        // Verify only specific port is allowed
-        assert!(profile.contains("(allow network* (remote ip \"localhost:12345\"))"));
+        // Verify deny-all has no allow rule for proxy
+        assert!(!profile.contains("(allow network* (remote ip \"localhost:12345\"))"));
+
+        // Clean up the random working directory
+        std::fs::remove_dir(&working_dir).ok();
+    }
+
+    #[test]
+    fn test_generate_profile_allows_proxy_when_enabled() {
+        let config = SandboxConfig::builder().network(AllowAll).build().unwrap();
+        let working_dir = config.working_dir().to_path_buf();
+        let (_policy, config_data) = config.into_parts();
+        let profile = generate_profile(&config_data, 23456).unwrap();
+
+        assert!(profile.contains("(deny network*)"));
+        assert!(profile.contains("(allow network* (remote ip \"localhost:23456\"))"));
 
         // Clean up the random working directory
         std::fs::remove_dir(&working_dir).ok();

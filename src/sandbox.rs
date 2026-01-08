@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::sync::{Arc, Mutex};
 
@@ -7,10 +7,72 @@ use executor_core::{try_init_global_executor, DefaultExecutor, Executor};
 
 use crate::command::Command;
 use crate::config::{SandboxConfig, SandboxConfigData};
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::ipc::IpcServer;
 use crate::network::{DenyAll, NetworkPolicy, NetworkProxy};
 use crate::platform;
+
+use askama::Template;
+
+/// Template for simple IPC wrapper (just forwards args)
+#[derive(Template)]
+#[template(path = "ipc/wrapper_simple.sh", escape = "none")]
+struct SimpleWrapperTemplate<'a> {
+    command: &'a str,
+}
+
+/// Template for IPC wrapper with primary argument conversion
+#[derive(Template)]
+#[template(path = "ipc/wrapper_primary_arg.sh", escape = "none")]
+struct PrimaryArgWrapperTemplate<'a> {
+    command: &'a str,
+    primary_arg: &'a str,
+}
+
+/// Create a wrapper script for an IPC command.
+///
+/// The wrapper script calls `leash-ipc <command> "$@"` to forward arguments
+/// to the IPC handler running on the host.
+///
+/// If `primary_arg` is provided, positional arguments are converted:
+/// - `command <value>` → `leash-ipc command --<primary_arg> "<value>"`
+fn create_ipc_wrapper(bin_dir: &Path, command: &str, primary_arg: Option<&str>) -> Result<()> {
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    let script_path = bin_dir.join(command);
+
+    let script_content = if let Some(arg_name) = primary_arg {
+        PrimaryArgWrapperTemplate {
+            command,
+            primary_arg: arg_name,
+        }
+        .render()
+        .map_err(|e| Error::IoError(format!("template render failed: {e}")))?
+    } else {
+        SimpleWrapperTemplate { command }
+            .render()
+            .map_err(|e| Error::IoError(format!("template render failed: {e}")))?
+    };
+
+    fs::write(&script_path, script_content).map_err(|e| {
+        Error::IoError(format!("failed to create IPC wrapper {}: {}", script_path.display(), e))
+    })?;
+
+    // Make executable on Unix
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&script_path)
+            .map_err(|e| Error::IoError(format!("failed to get permissions: {}", e)))?
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&script_path, perms)
+            .map_err(|e| Error::IoError(format!("failed to set permissions: {}", e)))?;
+    }
+
+    Ok(())
+}
 
 #[cfg(target_os = "macos")]
 type NativeBackend = platform::macos::MacOSBackend;
@@ -85,7 +147,7 @@ impl ProcessTracker {
 pub struct Sandbox<N: NetworkPolicy = DenyAll> {
     config_data: SandboxConfigData,
     backend: NativeBackend,
-    proxy: NetworkProxy<N>,
+    proxy: Option<NetworkProxy<N>>,
     ipc_server: Option<IpcServer>,
     process_tracker: ProcessTracker,
     working_dir_path: PathBuf,
@@ -139,12 +201,26 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
         let working_dir_path = config_data.working_dir.clone();
         let working_dir_auto_created = config_data.working_dir_auto_created;
 
-        // Create and start the network proxy
-        let proxy = NetworkProxy::new(policy, executor.clone()).await?;
+        // Create and start the network proxy (skip for DenyAll)
+        let proxy = if config_data.network_deny_all() {
+            None
+        } else {
+            Some(NetworkProxy::new(policy, executor.clone()).await?)
+        };
 
         // Start IPC server if configured
         let ipc_server = if let Some(router) = config_data.ipc.take() {
-            let socket_path = working_dir_path.join(".leash").join("ipc.sock");
+            let leash_dir = working_dir_path.join(".leash");
+            let socket_path = leash_dir.join("ipc.sock");
+
+            // Create wrapper scripts for each IPC command
+            let bin_dir = leash_dir.join("bin");
+            std::fs::create_dir_all(&bin_dir)?;
+            for (method, meta) in router.methods() {
+                create_ipc_wrapper(&bin_dir, method, meta.primary_arg.as_deref())?;
+            }
+            tracing::debug!(bin_dir = %bin_dir.display(), "created IPC wrapper scripts");
+
             let server = IpcServer::new(router, &socket_path, executor).await?;
             tracing::info!(socket_path = %socket_path.display(), "IPC server started");
             Some(server)
@@ -152,11 +228,18 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
             None
         };
 
-        tracing::info!(
-            proxy_addr = %proxy.addr(),
-            working_dir = %working_dir_path.display(),
-            "sandbox created"
-        );
+        if let Some(ref proxy) = proxy {
+            tracing::info!(
+                proxy_addr = %proxy.addr(),
+                working_dir = %working_dir_path.display(),
+                "sandbox created"
+            );
+        } else {
+            tracing::info!(
+                working_dir = %working_dir_path.display(),
+                "sandbox created (network disabled)"
+            );
+        }
 
         Ok(Self {
             config_data,
@@ -188,7 +271,10 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
     /// This URL should be set as HTTP_PROXY and HTTPS_PROXY for processes
     /// that need network access through the sandbox's proxy.
     pub fn proxy_url(&self) -> String {
-        self.proxy.proxy_url()
+        self.proxy
+            .as_ref()
+            .map(|proxy| proxy.proxy_url())
+            .unwrap_or_default()
     }
 
     /// Create a command builder for running a program in the sandbox
@@ -205,7 +291,7 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
             &self.config_data,
             &self.backend,
             &self.process_tracker,
-            &self.proxy,
+            self.proxy.as_ref(),
             ipc_socket_path,
             program,
         )
@@ -271,7 +357,7 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
     ) -> Result<crate::pty::PtyExitStatus> {
         crate::pty::run_with_pty(
             &self.config_data,
-            &self.proxy,
+            self.proxy.as_ref(),
             program,
             args,
             envs,
@@ -291,8 +377,10 @@ impl<N: NetworkPolicy> Drop for Sandbox<N> {
         self.ipc_server.take();
 
         // Stop the network proxy
-        self.proxy.stop();
-        tracing::debug!("stopped network proxy");
+        if let Some(ref proxy) = self.proxy {
+            proxy.stop();
+            tracing::debug!("stopped network proxy");
+        }
 
         // Kill all child processes
         self.process_tracker.kill_all();
@@ -327,31 +415,28 @@ impl<N: NetworkPolicy> Drop for Sandbox<N> {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn test_sandbox_creation() {
-        // This may fail on non-macOS platforms currently
-        if cfg!(target_os = "macos") {
-            let sandbox = Sandbox::new().await.unwrap();
-            let working_dir = sandbox.working_dir().to_path_buf();
-            assert!(working_dir.exists());
-            drop(sandbox);
-            // Working dir should be deleted after drop
-            assert!(!working_dir.exists());
-        }
+        let sandbox = Sandbox::new().await.unwrap();
+        let working_dir = sandbox.working_dir().to_path_buf();
+        assert!(working_dir.exists());
+        drop(sandbox);
+        // Working dir should be deleted after drop
+        assert!(!working_dir.exists());
     }
 
+    #[cfg(target_os = "macos")]
     #[tokio::test]
     async fn test_keep_working_dir() {
-        if cfg!(target_os = "macos") {
-            let working_dir = {
-                let mut sandbox = Sandbox::new().await.unwrap();
-                sandbox.keep_working_dir();
-                sandbox.working_dir().to_path_buf()
-            };
-            // Working dir should still exist after drop
-            assert!(working_dir.exists());
-            // Clean up manually
-            std::fs::remove_dir(&working_dir).ok();
-        }
+        let working_dir = {
+            let mut sandbox = Sandbox::new().await.unwrap();
+            sandbox.keep_working_dir();
+            sandbox.working_dir().to_path_buf()
+        };
+        // Working dir should still exist after drop
+        assert!(working_dir.exists());
+        // Clean up manually
+        std::fs::remove_dir(&working_dir).ok();
     }
 }

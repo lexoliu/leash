@@ -36,7 +36,7 @@ pub(crate) mod server;
 
 pub use command::IpcCommand;
 pub use protocol::IpcError;
-pub use router::IpcRouter;
+pub use router::{CommandMeta, IpcRouter};
 
 // IpcServer is internal - used by Sandbox, not exposed to users
 pub(crate) use server::IpcServer;

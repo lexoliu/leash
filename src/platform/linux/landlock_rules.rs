@@ -119,7 +119,7 @@ pub fn build_ruleset(config: &LandlockConfig, proxy_port: u16) -> Result<Prepare
 
     // Start with all filesystem access rights handled (deny by default)
     let fs_access = AccessFs::from_all(abi);
-    let net_access = AccessNet::from_all(abi);
+    let net_access = AccessNet::ConnectTcp;
 
     let mut ruleset = Ruleset::default()
         .handle_access(fs_access)

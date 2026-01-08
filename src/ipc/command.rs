@@ -1,5 +1,6 @@
 //! IPC command trait definition
 
+use std::borrow::Cow;
 use std::future::Future;
 
 use serde::{Serialize, de::DeserializeOwned};
@@ -12,6 +13,7 @@ use serde::{Serialize, de::DeserializeOwned};
 /// # Example
 ///
 /// ```rust,ignore
+/// use std::borrow::Cow;
 /// use serde::{Serialize, Deserialize};
 /// use leash::ipc::IpcCommand;
 ///
@@ -32,6 +34,10 @@ use serde::{Serialize, de::DeserializeOwned};
 ///         "search".to_string()
 ///     }
 ///
+///     fn primary_arg(&self) -> Option<Cow<'static, str>> {
+///         Some(Cow::Borrowed("query"))  // Enables: search "rust" → search --query "rust"
+///     }
+///
 ///     async fn handle(&mut self) -> SearchResult {
 ///         let results = do_search(&self.query).await;
 ///         SearchResult { items: results }
@@ -46,6 +52,25 @@ pub trait IpcCommand: Serialize + DeserializeOwned + Send + 'static {
     ///
     /// This name is used to route incoming requests to the correct handler.
     fn name(&self) -> String;
+
+    /// Primary argument name for positional argument conversion.
+    ///
+    /// When set, the wrapper script will convert positional arguments to named arguments:
+    /// `command <value>` → `leash-ipc command --<primary_arg> "<value>"`
+    ///
+    /// Returns `None` by default (no conversion).
+    fn primary_arg(&self) -> Option<Cow<'static, str>> {
+        None
+    }
+
+    /// Set the method name on the command after deserialization.
+    ///
+    /// This is called by the router after deserializing the command from IPC params.
+    /// Override this if your command needs the method name (e.g., for dispatching
+    /// to different handlers based on the method name).
+    ///
+    /// Default implementation does nothing.
+    fn set_method_name(&mut self, _name: &str) {}
 
     /// Handle this command and produce a response
     ///

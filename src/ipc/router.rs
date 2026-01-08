@@ -12,12 +12,19 @@ type ErasedHandler = Box<
     dyn Fn(&[u8]) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, IpcError>> + Send>> + Send + Sync,
 >;
 
+/// Metadata about a registered command
+pub struct CommandMeta {
+    /// Primary argument name for positional argument conversion
+    pub primary_arg: Option<String>,
+}
+
 /// Router that dispatches IPC requests to registered command handlers
 ///
 /// The router stores type-erased handlers internally, but registration is type-safe
 /// via the `IpcCommand` trait.
 pub struct IpcRouter {
     handlers: HashMap<String, ErasedHandler>,
+    metadata: HashMap<String, CommandMeta>,
 }
 
 impl IpcRouter {
@@ -25,6 +32,7 @@ impl IpcRouter {
     pub fn new() -> Self {
         Self {
             handlers: HashMap::new(),
+            metadata: HashMap::new(),
         }
     }
 
@@ -43,16 +51,27 @@ impl IpcRouter {
     /// ```
     pub fn register<C: IpcCommand>(mut self, cmd: C) -> Self {
         let name = cmd.name();
+        let primary_arg = cmd.primary_arg();
+        let method_name = name.clone();
+
         let handler: ErasedHandler = Box::new(move |params: &[u8]| {
             let params = params.to_vec();
+            let method_name = method_name.clone();
             Box::pin(async move {
                 let mut cmd: C = rmp_serde::from_slice(&params)?;
+                cmd.set_method_name(&method_name);
                 let response = cmd.handle().await;
                 let bytes = rmp_serde::to_vec(&response)?;
                 Ok(bytes)
             })
         });
 
+        self.metadata.insert(
+            name.clone(),
+            CommandMeta {
+                primary_arg: primary_arg.map(|c| c.into_owned()),
+            },
+        );
         self.handlers.insert(name, handler);
         self
     }
@@ -69,9 +88,9 @@ impl IpcRouter {
         handler(params).await
     }
 
-    /// Get the list of registered method names
-    pub fn methods(&self) -> impl Iterator<Item = &str> {
-        self.handlers.keys().map(|s| s.as_str())
+    /// Get the list of registered method names with their metadata
+    pub fn methods(&self) -> impl Iterator<Item = (&str, &CommandMeta)> {
+        self.metadata.iter().map(|(k, v)| (k.as_str(), v))
     }
 }
 

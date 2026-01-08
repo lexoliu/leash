@@ -47,7 +47,7 @@ pub struct Command<'a> {
     config: &'a SandboxConfigData,
     backend: &'a NativeBackend,
     process_tracker: &'a ProcessTracker,
-    proxy_url: String,
+    proxy_url: Option<String>,
     proxy_port: u16,
     ipc_socket_path: Option<PathBuf>,
     program: String,
@@ -65,16 +65,21 @@ impl<'a> Command<'a> {
         config: &'a SandboxConfigData,
         backend: &'a NativeBackend,
         process_tracker: &'a ProcessTracker,
-        proxy: &NetworkProxy<N>,
+        proxy: Option<&NetworkProxy<N>>,
         ipc_socket_path: Option<PathBuf>,
         program: impl Into<String>,
     ) -> Self {
+        let (proxy_url, proxy_port) = match proxy {
+            Some(proxy) => (Some(proxy.proxy_url()), proxy.addr().port()),
+            None => (None, 0),
+        };
+
         Self {
             config,
             backend,
             process_tracker,
-            proxy_url: proxy.proxy_url(),
-            proxy_port: proxy.addr().port(),
+            proxy_url,
+            proxy_port,
             ipc_socket_path,
             program: program.into(),
             args: Vec::new(),
@@ -146,23 +151,25 @@ impl<'a> Command<'a> {
     fn build_envs(&self) -> Vec<(String, String)> {
         let mut envs = self.envs.clone();
 
-        // Auto-inject proxy environment variables
-        // These ensure all network traffic goes through our proxy
-        let proxy_vars = [
-            ("HTTP_PROXY", &self.proxy_url),
-            ("HTTPS_PROXY", &self.proxy_url),
-            ("http_proxy", &self.proxy_url),
-            ("https_proxy", &self.proxy_url),
-        ];
+        if let Some(ref proxy_url) = self.proxy_url {
+            // Auto-inject proxy environment variables
+            // These ensure all network traffic goes through our proxy
+            let proxy_vars = [
+                ("HTTP_PROXY", proxy_url),
+                ("HTTPS_PROXY", proxy_url),
+                ("http_proxy", proxy_url),
+                ("https_proxy", proxy_url),
+            ];
 
-        for (key, val) in proxy_vars {
-            // Only add if user hasn't explicitly set it
-            if !envs.iter().any(|(k, _)| k == key) {
-                envs.push((key.to_string(), val.clone()));
+            for (key, val) in proxy_vars {
+                // Only add if user hasn't explicitly set it
+                if !envs.iter().any(|(k, _)| k == key) {
+                    envs.push((key.to_string(), val.clone()));
+                }
             }
         }
 
-        // Inject IPC socket path if configured
+        // Inject IPC socket path and update PATH if configured
         if let Some(ref socket_path) = self.ipc_socket_path {
             if !envs.iter().any(|(k, _)| k == "LEASH_IPC_SOCKET") {
                 envs.push((
@@ -170,6 +177,14 @@ impl<'a> Command<'a> {
                     socket_path.to_string_lossy().to_string(),
                 ));
             }
+
+            // Add .leash/bin to PATH for IPC wrapper scripts
+            let leash_bin = self.config.working_dir().join(".leash").join("bin");
+            let current_path = std::env::var("PATH").unwrap_or_default();
+            let new_path = format!("{}:{}", leash_bin.display(), current_path);
+            // Remove any existing PATH entry and add the new one
+            envs.retain(|(k, _)| k != "PATH");
+            envs.push(("PATH".to_string(), new_path));
         }
 
         envs
