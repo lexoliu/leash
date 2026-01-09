@@ -12,7 +12,7 @@ mod sandbox;
 
 use cli::{Cli, Commands};
 use config::{load_config, merge_config};
-use error::{to_exit_code, CliResult};
+use error::{CliResult, to_exit_code};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();

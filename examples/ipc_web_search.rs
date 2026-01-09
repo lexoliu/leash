@@ -75,10 +75,8 @@ async fn main() -> leash::Result<()> {
         .ipc(router)
         .executable_path(&leash_ipc)
         .build()?;
-    let sandbox = Sandbox::with_config_and_executor(
-        config,
-        executor_core::tokio::TokioGlobal,
-    ).await?;
+    let sandbox =
+        Sandbox::with_config_and_executor(config, executor_core::tokio::TokioGlobal).await?;
 
     println!("Sandbox: {}", sandbox.working_dir().display());
 

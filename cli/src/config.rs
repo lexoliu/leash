@@ -184,10 +184,7 @@ pub fn merge_config(file: FileConfig, cli: &CommonArgs) -> Result<MergedConfig> 
     let limits = build_resource_limits(&file.limits, cli);
 
     // Working directory: CLI > file
-    let working_dir = cli
-        .working_dir
-        .clone()
-        .or(file.workdir.path);
+    let working_dir = cli.working_dir.clone().or(file.workdir.path);
 
     let keep_working_dir = cli.keep_working_dir || file.workdir.keep.unwrap_or(false);
 

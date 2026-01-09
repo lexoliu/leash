@@ -154,8 +154,10 @@ fn add_socket_restrictions(
     const SOCK_RAW_CLOEXEC: u64 = (libc::SOCK_RAW | libc::SOCK_CLOEXEC) as u64;
 
     // Socket types with both flags
-    const SOCK_STREAM_BOTH: u64 = (libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC) as u64;
-    const SOCK_DGRAM_BOTH: u64 = (libc::SOCK_DGRAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC) as u64;
+    const SOCK_STREAM_BOTH: u64 =
+        (libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC) as u64;
+    const SOCK_DGRAM_BOTH: u64 =
+        (libc::SOCK_DGRAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC) as u64;
     const SOCK_RAW_BOTH: u64 = (libc::SOCK_RAW | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC) as u64;
 
     // Domains
@@ -164,74 +166,129 @@ fn add_socket_restrictions(
     const AF_PACKET: u64 = libc::AF_PACKET as u64;
 
     // Block UDP and RAW sockets for IPv4 and IPv6
-    let dgram_types = [SOCK_DGRAM, SOCK_DGRAM_NONBLOCK, SOCK_DGRAM_CLOEXEC, SOCK_DGRAM_BOTH];
+    let dgram_types = [
+        SOCK_DGRAM,
+        SOCK_DGRAM_NONBLOCK,
+        SOCK_DGRAM_CLOEXEC,
+        SOCK_DGRAM_BOTH,
+    ];
     let raw_types = [SOCK_RAW, SOCK_RAW_NONBLOCK, SOCK_RAW_CLOEXEC, SOCK_RAW_BOTH];
-    let stream_types = [SOCK_STREAM, SOCK_STREAM_NONBLOCK, SOCK_STREAM_CLOEXEC, SOCK_STREAM_BOTH];
+    let stream_types = [
+        SOCK_STREAM,
+        SOCK_STREAM_NONBLOCK,
+        SOCK_STREAM_CLOEXEC,
+        SOCK_STREAM_BOTH,
+    ];
 
     let mut socket_rules = Vec::new();
 
     // Block AF_PACKET entirely (raw packet sockets)
-    socket_rules.push(SeccompRule::new(vec![
-        SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_PACKET)
-            .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
-    ]).map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?);
+    socket_rules.push(
+        SeccompRule::new(vec![
+            SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_PACKET)
+                .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
+        ])
+        .map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?,
+    );
 
     // Block UDP sockets (AF_INET/AF_INET6 + SOCK_DGRAM variants)
     for &sock_type in &dgram_types {
         // AF_INET + SOCK_DGRAM
-        socket_rules.push(SeccompRule::new(vec![
-            SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET)
-                .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
-            SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
-                .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
-        ]).map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?);
+        socket_rules.push(
+            SeccompRule::new(vec![
+                SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET)
+                    .map_err(|e| {
+                        Error::InvalidProfile(format!("Seccomp condition error: {:?}", e))
+                    })?,
+                SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
+                    .map_err(|e| {
+                        Error::InvalidProfile(format!("Seccomp condition error: {:?}", e))
+                    })?,
+            ])
+            .map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?,
+        );
 
         // AF_INET6 + SOCK_DGRAM
-        socket_rules.push(SeccompRule::new(vec![
-            SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET6)
-                .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
-            SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
-                .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
-        ]).map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?);
+        socket_rules.push(
+            SeccompRule::new(vec![
+                SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET6)
+                    .map_err(|e| {
+                        Error::InvalidProfile(format!("Seccomp condition error: {:?}", e))
+                    })?,
+                SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
+                    .map_err(|e| {
+                        Error::InvalidProfile(format!("Seccomp condition error: {:?}", e))
+                    })?,
+            ])
+            .map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?,
+        );
     }
 
     // Block RAW sockets (AF_INET/AF_INET6 + SOCK_RAW variants)
     for &sock_type in &raw_types {
         // AF_INET + SOCK_RAW
-        socket_rules.push(SeccompRule::new(vec![
-            SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET)
-                .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
-            SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
-                .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
-        ]).map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?);
+        socket_rules.push(
+            SeccompRule::new(vec![
+                SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET)
+                    .map_err(|e| {
+                        Error::InvalidProfile(format!("Seccomp condition error: {:?}", e))
+                    })?,
+                SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
+                    .map_err(|e| {
+                        Error::InvalidProfile(format!("Seccomp condition error: {:?}", e))
+                    })?,
+            ])
+            .map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?,
+        );
 
         // AF_INET6 + SOCK_RAW
-        socket_rules.push(SeccompRule::new(vec![
-            SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET6)
-                .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
-            SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
-                .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
-        ]).map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?);
+        socket_rules.push(
+            SeccompRule::new(vec![
+                SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET6)
+                    .map_err(|e| {
+                        Error::InvalidProfile(format!("Seccomp condition error: {:?}", e))
+                    })?,
+                SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
+                    .map_err(|e| {
+                        Error::InvalidProfile(format!("Seccomp condition error: {:?}", e))
+                    })?,
+            ])
+            .map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?,
+        );
     }
 
     if network_deny_all {
         // Block TCP sockets (AF_INET/AF_INET6 + SOCK_STREAM variants)
         for &sock_type in &stream_types {
             // AF_INET + SOCK_STREAM
-            socket_rules.push(SeccompRule::new(vec![
-                SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET)
-                    .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
-                SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
-                    .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
-            ]).map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?);
+            socket_rules.push(
+                SeccompRule::new(vec![
+                    SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET)
+                        .map_err(|e| {
+                            Error::InvalidProfile(format!("Seccomp condition error: {:?}", e))
+                        })?,
+                    SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
+                        .map_err(|e| {
+                            Error::InvalidProfile(format!("Seccomp condition error: {:?}", e))
+                        })?,
+                ])
+                .map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?,
+            );
 
             // AF_INET6 + SOCK_STREAM
-            socket_rules.push(SeccompRule::new(vec![
-                SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET6)
-                    .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
-                SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
-                    .map_err(|e| Error::InvalidProfile(format!("Seccomp condition error: {:?}", e)))?,
-            ]).map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?);
+            socket_rules.push(
+                SeccompRule::new(vec![
+                    SeccompCondition::new(0, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, AF_INET6)
+                        .map_err(|e| {
+                        Error::InvalidProfile(format!("Seccomp condition error: {:?}", e))
+                    })?,
+                    SeccompCondition::new(1, SeccompCmpArgLen::Dword, SeccompCmpOp::Eq, sock_type)
+                        .map_err(|e| {
+                            Error::InvalidProfile(format!("Seccomp condition error: {:?}", e))
+                        })?,
+                ])
+                .map_err(|e| Error::InvalidProfile(format!("Seccomp rule error: {:?}", e)))?,
+            );
         }
     }
 

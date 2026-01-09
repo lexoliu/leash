@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use executor_core::async_executor::AsyncExecutor;
-use executor_core::{try_init_global_executor, DefaultExecutor, Executor};
+use executor_core::{DefaultExecutor, Executor, try_init_global_executor};
 
 /// Counter for generating unique socket names within a process.
 static SOCKET_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -53,7 +53,10 @@ fi
     );
 
     // Generate variable assignments for all but last arg
-    for (i, _arg) in positional_args.iter().enumerate().take(positional_args.len().saturating_sub(1))
+    for (i, _arg) in positional_args
+        .iter()
+        .enumerate()
+        .take(positional_args.len().saturating_sub(1))
     {
         script.push_str(&format!(
             r#"arg{i}="$1"

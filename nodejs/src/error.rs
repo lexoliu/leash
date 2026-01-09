@@ -11,20 +11,23 @@ pub fn convert_error(err: leash::Error) -> Error {
         leash::Error::NotEnforced(msg) => ("ERR_NOT_ENFORCED", msg.to_string()),
         leash::Error::PartialEnforcement(msg) => ("ERR_PARTIAL_ENFORCEMENT", msg.to_string()),
         leash::Error::InvalidProfile(msg) => ("ERR_INVALID_PROFILE", msg.clone()),
-        leash::Error::PathNotFound(path) => {
-            ("ERR_PATH_NOT_FOUND", format!("Path not found: {}", path.display()))
-        }
+        leash::Error::PathNotFound(path) => (
+            "ERR_PATH_NOT_FOUND",
+            format!("Path not found: {}", path.display()),
+        ),
         leash::Error::PythonNotFound => ("ERR_PYTHON_NOT_FOUND", err.to_string()),
-        leash::Error::VenvNotFound(path) => {
-            ("ERR_VENV_NOT_FOUND", format!("Venv not found: {}", path.display()))
-        }
+        leash::Error::VenvNotFound(path) => (
+            "ERR_VENV_NOT_FOUND",
+            format!("Venv not found: {}", path.display()),
+        ),
         leash::Error::VenvCreationFailed(msg) => ("ERR_VENV_CREATION", msg.clone()),
         leash::Error::PackageInstallFailed(msg) => ("ERR_PACKAGE_INSTALL", msg.clone()),
         leash::Error::ProxyError(msg) => ("ERR_PROXY", msg.clone()),
         leash::Error::ProcessError(e) => ("ERR_PROCESS", e.to_string()),
-        leash::Error::CommandFailed { code, message } => {
-            ("ERR_COMMAND_FAILED", format!("Exit code {}: {}", code, message))
-        }
+        leash::Error::CommandFailed { code, message } => (
+            "ERR_COMMAND_FAILED",
+            format!("Exit code {}: {}", code, message),
+        ),
         leash::Error::ConfigError(msg) => ("ERR_CONFIG", msg.clone()),
         leash::Error::FfiError(msg) => ("ERR_FFI", msg.clone()),
         leash::Error::IoError(msg) => ("ERR_IO", msg.clone()),

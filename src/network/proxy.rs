@@ -7,16 +7,16 @@ use std::future::Future;
 use std::net::SocketAddr;
 use std::pin::Pin;
 use std::ptr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 
 use async_net::{TcpListener, TcpStream};
 use bytes::Bytes;
 use executor_core::{Executor, Task};
-use futures_lite::io::{AsyncRead, AsyncWrite};
 use futures_lite::StreamExt;
-use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
+use futures_lite::io::{AsyncRead, AsyncWrite};
+use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
 use hyper::body::Incoming;
 use hyper::rt::Executor as HyperExecutor;
 use hyper::server::conn::http1;
@@ -52,7 +52,12 @@ impl<N: NetworkPolicy + 'static> NetworkProxy<N> {
         let running_clone = Arc::clone(&running);
 
         executor
-            .spawn(run_proxy(listener, policy_clone, running_clone, executor.clone()))
+            .spawn(run_proxy(
+                listener,
+                policy_clone,
+                running_clone,
+                executor.clone(),
+            ))
             .detach();
 
         tracing::debug!("network proxy: started");
@@ -169,14 +174,11 @@ async fn run_proxy<N: NetworkPolicy + 'static, E: Executor + Clone + 'static>(
     let mut incoming = listener.incoming();
 
     while running.load(Ordering::SeqCst) {
-        let accept_result = futures_lite::future::or(
-            async { incoming.next().await },
-            async {
-                futures_lite::future::yield_now().await;
-                async_io::Timer::after(std::time::Duration::from_millis(100)).await;
-                None
-            },
-        )
+        let accept_result = futures_lite::future::or(async { incoming.next().await }, async {
+            futures_lite::future::yield_now().await;
+            async_io::Timer::after(std::time::Duration::from_millis(100)).await;
+            None
+        })
         .await;
 
         match accept_result {
@@ -508,9 +510,6 @@ mod tests {
         assert_eq!(format_target_addr("example.com", 443), "example.com:443");
         assert_eq!(format_target_addr("127.0.0.1", 8080), "127.0.0.1:8080");
         assert_eq!(format_target_addr("::1", 443), "[::1]:443");
-        assert_eq!(
-            format_target_addr("2001:db8::1", 80),
-            "[2001:db8::1]:80"
-        );
+        assert_eq!(format_target_addr("2001:db8::1", 80), "[2001:db8::1]:80");
     }
 }

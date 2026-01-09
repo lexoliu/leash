@@ -123,9 +123,7 @@ impl ChildProcessJs {
                     buf.truncate(n);
                     Ok(buf.into())
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    Ok(Vec::new().into())
-                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(Vec::new().into()),
                 Err(e) => Err(Error::from_reason(format!(
                     "Failed to read from stdout: {}",
                     e
@@ -147,9 +145,7 @@ impl ChildProcessJs {
                     buf.truncate(n);
                     Ok(buf.into())
                 }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    Ok(Vec::new().into())
-                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => Ok(Vec::new().into()),
                 Err(e) => Err(Error::from_reason(format!(
                     "Failed to read from stderr: {}",
                     e

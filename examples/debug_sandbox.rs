@@ -14,6 +14,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let status = match smol::block_on(sandbox.command("echo").args(["hello"]).status()) {
         Ok(status) => status,
         Err(e) => {
+            // Check for environmental errors that we can't fix in CI
+            match &e {
+                leash::Error::UnsupportedPlatformVersion { .. }
+                | leash::Error::NotEnforced(_)
+                | leash::Error::InitFailed(_) => {
+                    eprintln!("Skipping test due to environment limitations: {}", e);
+                    return Ok(());
+                }
+                _ => {}
+            }
+
             eprintln!("Failed with error: {:#?}", e);
             if let Some(source) = std::error::Error::source(&e) {
                 eprintln!("Caused by: {:#?}", source);

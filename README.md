@@ -1,6 +1,6 @@
 # leash
 
-A cross-platform Rust library for running untrusted code in secure sandboxes with native OS-level isolation.
+A cross-platform Rust library for running LLM-generated code in secure sandboxes with native OS-level isolation.
 
 ## Platform Support
 

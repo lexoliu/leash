@@ -134,7 +134,7 @@ impl SandboxConfigJs {
 #[napi]
 pub fn preset_strict() -> SandboxConfigJs {
     SandboxConfigJs {
-        network: None, // DenyAll
+        network: None,  // DenyAll
         security: None, // Strict by default
         filesystem_strict: Some(true),
         writable_paths: None,

@@ -21,12 +21,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Test 1: Try to read /etc/shadow (should fail)
     println!("Test 1: Reading /etc/shadow (should fail)");
-    let output = smol::block_on(
-        sandbox
-            .command("cat")
-            .args(["/etc/shadow"])
-            .output(),
-    )?;
+    let output = smol::block_on(sandbox.command("cat").args(["/etc/shadow"]).output())?;
     println!("  Exit code: {:?}", output.status.code());
     println!("  Stderr: {}", String::from_utf8_lossy(&output.stderr));
     assert!(
@@ -44,7 +39,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .output(),
     )?;
     println!("  Exit code: {:?}", output.status.code());
-    println!("  Stdout: {}", String::from_utf8_lossy(&output.stdout).trim());
+    println!(
+        "  Stdout: {}",
+        String::from_utf8_lossy(&output.stdout).trim()
+    );
     assert!(
         output.status.success(),
         "Should be able to read /etc/passwd"
@@ -60,7 +58,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .output(),
     )?;
     println!("  Exit code: {:?}", output.status.code());
-    println!("  Stderr: {}", String::from_utf8_lossy(&output.stderr).lines().take(3).collect::<Vec<_>>().join("\n  "));
+    println!(
+        "  Stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+            .lines()
+            .take(3)
+            .collect::<Vec<_>>()
+            .join("\n  ")
+    );
     assert!(
         !output.status.success(),
         "SECURITY FAILURE: Was able to create UDP socket!"
@@ -91,11 +96,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .output(),
     )?;
     println!("  Exit code: {:?}", output.status.code());
-    println!("  Stdout: {}", String::from_utf8_lossy(&output.stdout).trim());
-    assert!(
-        output.status.success(),
-        "TCP sockets should work"
+    println!(
+        "  Stdout: {}",
+        String::from_utf8_lossy(&output.stdout).trim()
     );
+    assert!(output.status.success(), "TCP sockets should work");
     println!("  PASS: TCP socket works\n");
 
     // Test 6: Try to access network directly (should fail - Landlock blocks non-proxy TCP)
@@ -103,7 +108,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let output = smol::block_on(
         sandbox
             .command("python3")
-            .args(["-c", r#"
+            .args([
+                "-c",
+                r#"
 import socket
 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 s.settimeout(2)
@@ -113,11 +120,15 @@ try:
 except Exception as e:
     print(f'Connection blocked: {e}')
     exit(1)
-"#])
+"#,
+            ])
             .output(),
     )?;
     println!("  Exit code: {:?}", output.status.code());
-    println!("  Output: {}", String::from_utf8_lossy(&output.stdout).trim());
+    println!(
+        "  Output: {}",
+        String::from_utf8_lossy(&output.stdout).trim()
+    );
     // This should fail because Landlock restricts TCP to proxy port only
     println!("  PASS: Direct TCP connection restricted\n");
 
@@ -126,11 +137,17 @@ except Exception as e:
     let output = smol::block_on(
         sandbox
             .command("sh")
-            .args(["-c", "echo 'test content' > test_file.txt && cat test_file.txt"])
+            .args([
+                "-c",
+                "echo 'test content' > test_file.txt && cat test_file.txt",
+            ])
             .output(),
     )?;
     println!("  Exit code: {:?}", output.status.code());
-    println!("  Stdout: {}", String::from_utf8_lossy(&output.stdout).trim());
+    println!(
+        "  Stdout: {}",
+        String::from_utf8_lossy(&output.stdout).trim()
+    );
     assert!(
         output.status.success(),
         "Should be able to write to working directory"

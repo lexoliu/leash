@@ -3,7 +3,7 @@ use std::path::Path;
 use leash::{StdioConfig, VenvConfig, VenvManager};
 
 use crate::cli::PythonArgs;
-use crate::config::{merge_python_args, MergedConfig};
+use crate::config::{MergedConfig, merge_python_args};
 use crate::error::CliResult;
 use crate::sandbox::create_sandbox;
 

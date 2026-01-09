@@ -8,8 +8,9 @@
 use std::path::{Path, PathBuf};
 
 use landlock::{
-    make_bitflags, Access, AccessFs, AccessNet, BitFlags, NetPort, PathBeneath, PathFd, RestrictSelfError,
-    Ruleset, RulesetAttr, RulesetCreated, RulesetCreatedAttr, RulesetError, RulesetStatus, ABI,
+    ABI, Access, AccessFs, AccessNet, BitFlags, NetPort, PathBeneath, PathFd, RestrictSelfError,
+    Ruleset, RulesetAttr, RulesetCreated, RulesetCreatedAttr, RulesetError, RulesetStatus,
+    make_bitflags,
 };
 
 use crate::config::SandboxConfigData;
@@ -91,12 +92,8 @@ impl PreparedRuleset {
         // Fast-fail if not fully enforced
         match status.ruleset {
             RulesetStatus::FullyEnforced => Ok(()),
-            RulesetStatus::PartiallyEnforced => {
-                Err(std::io::Error::from_raw_os_error(libc::EPERM))
-            }
-            RulesetStatus::NotEnforced => {
-                Err(std::io::Error::from_raw_os_error(libc::EPERM))
-            }
+            RulesetStatus::PartiallyEnforced => Err(std::io::Error::from_raw_os_error(libc::EPERM)),
+            RulesetStatus::NotEnforced => Err(std::io::Error::from_raw_os_error(libc::EPERM)),
         }
     }
 }
@@ -166,10 +163,7 @@ pub fn build_ruleset(config: &LandlockConfig, proxy_port: u16) -> Result<Prepare
     // System config and pseudo-filesystems (read-only, no execute needed)
     if !config.filesystem_strict() {
         let system_read_paths = [
-            "/etc",
-            "/proc",
-            "/sys",
-            "/run", // Needed for various runtime files
+            "/etc", "/proc", "/sys", "/run", // Needed for various runtime files
         ];
 
         for path in &system_read_paths {

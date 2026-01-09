@@ -39,24 +39,35 @@ fn main() {
     unsafe {
         cmd.pre_exec(|| {
             eprintln!("  pre_exec: applying Landlock");
-            use landlock::{Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI};
+            use landlock::{
+                ABI, Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr,
+                RulesetCreatedAttr,
+            };
 
             let ruleset = Ruleset::default()
                 .handle_access(AccessFs::from_all(ABI::V4))
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("handle_access: {}", e)))?
+                .map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::Other, format!("handle_access: {}", e))
+                })?
                 .create()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("create: {}", e)))?;
+                .map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::Other, format!("create: {}", e))
+                })?;
 
             // Add /tmp rule
             let ruleset = if let Ok(path_fd) = PathFd::new("/tmp") {
-                ruleset.add_rule(PathBeneath::new(path_fd, AccessFs::from_all(ABI::V4)))
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("add_rule: {}", e)))?
+                ruleset
+                    .add_rule(PathBeneath::new(path_fd, AccessFs::from_all(ABI::V4)))
+                    .map_err(|e| {
+                        std::io::Error::new(std::io::ErrorKind::Other, format!("add_rule: {}", e))
+                    })?
             } else {
                 ruleset
             };
 
-            let status = ruleset.restrict_self()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("restrict_self: {}", e)))?;
+            let status = ruleset.restrict_self().map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, format!("restrict_self: {}", e))
+            })?;
 
             eprintln!("  pre_exec: Landlock status = {:?}", status.ruleset);
             Ok(())
@@ -74,8 +85,8 @@ fn main() {
     unsafe {
         cmd.pre_exec(|| {
             eprintln!("  pre_exec: applying Seccomp");
-            use std::collections::BTreeMap;
             use seccompiler::{SeccompAction, SeccompFilter, TargetArch};
+            use std::collections::BTreeMap;
 
             let rules: BTreeMap<i64, Vec<seccompiler::SeccompRule>> = BTreeMap::new();
             let filter = SeccompFilter::new(
@@ -84,13 +95,17 @@ fn main() {
                 SeccompAction::Allow,
                 TargetArch::aarch64,
             )
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("SeccompFilter: {:?}", e)))?;
+            .map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, format!("SeccompFilter: {:?}", e))
+            })?;
 
-            let program: seccompiler::BpfProgram = filter.try_into()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("BpfProgram: {:?}", e)))?;
+            let program: seccompiler::BpfProgram = filter.try_into().map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, format!("BpfProgram: {:?}", e))
+            })?;
 
-            seccompiler::apply_filter(&program)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("apply_filter: {:?}", e)))?;
+            seccompiler::apply_filter(&program).map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, format!("apply_filter: {:?}", e))
+            })?;
 
             eprintln!("  pre_exec: Seccomp applied");
             Ok(())
@@ -111,17 +126,27 @@ fn main() {
             eprintln!("  pre_exec: applying both");
 
             // Landlock
-            use landlock::{Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI};
+            use landlock::{
+                ABI, Access, AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr,
+                RulesetCreatedAttr,
+            };
 
             let ruleset = Ruleset::default()
                 .handle_access(AccessFs::from_all(ABI::V4))
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("handle_access: {}", e)))?
+                .map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::Other, format!("handle_access: {}", e))
+                })?
                 .create()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("create: {}", e)))?;
+                .map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::Other, format!("create: {}", e))
+                })?;
 
             let ruleset = if let Ok(path_fd) = PathFd::new("/tmp") {
-                ruleset.add_rule(PathBeneath::new(path_fd, AccessFs::from_all(ABI::V4)))
-                    .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("add_rule: {}", e)))?
+                ruleset
+                    .add_rule(PathBeneath::new(path_fd, AccessFs::from_all(ABI::V4)))
+                    .map_err(|e| {
+                        std::io::Error::new(std::io::ErrorKind::Other, format!("add_rule: {}", e))
+                    })?
             } else {
                 ruleset
             };
@@ -130,13 +155,16 @@ fn main() {
                 Ok(status) => eprintln!("  pre_exec: Landlock status = {:?}", status.ruleset),
                 Err(e) => {
                     eprintln!("  pre_exec: Landlock restrict_self FAILED: {}", e);
-                    return Err(std::io::Error::new(std::io::ErrorKind::Other, format!("restrict_self: {}", e)));
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        format!("restrict_self: {}", e),
+                    ));
                 }
             }
 
             // Seccomp
-            use std::collections::BTreeMap;
             use seccompiler::{SeccompAction, SeccompFilter, TargetArch};
+            use std::collections::BTreeMap;
 
             let rules: BTreeMap<i64, Vec<seccompiler::SeccompRule>> = BTreeMap::new();
             let filter = SeccompFilter::new(
@@ -145,13 +173,17 @@ fn main() {
                 SeccompAction::Allow,
                 TargetArch::aarch64,
             )
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("SeccompFilter: {:?}", e)))?;
+            .map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, format!("SeccompFilter: {:?}", e))
+            })?;
 
-            let program: seccompiler::BpfProgram = filter.try_into()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("BpfProgram: {:?}", e)))?;
+            let program: seccompiler::BpfProgram = filter.try_into().map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, format!("BpfProgram: {:?}", e))
+            })?;
 
-            seccompiler::apply_filter(&program)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("apply_filter: {:?}", e)))?;
+            seccompiler::apply_filter(&program).map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, format!("apply_filter: {:?}", e))
+            })?;
 
             eprintln!("  pre_exec: Seccomp done");
             Ok(())

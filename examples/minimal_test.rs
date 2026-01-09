@@ -15,18 +15,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     unsafe {
         cmd.pre_exec(|| {
-            use landlock::{Access, AccessFs, Ruleset, RulesetAttr, RulesetCreatedAttr, ABI};
+            use landlock::{ABI, Access, AccessFs, Ruleset, RulesetAttr, RulesetCreatedAttr};
 
             let abi = ABI::V4;
             let ruleset = Ruleset::default()
                 .handle_access(AccessFs::from_all(abi))
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("handle_access: {}", e)))?
+                .map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::Other, format!("handle_access: {}", e))
+                })?
                 .create()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("create: {}", e)))?;
+                .map_err(|e| {
+                    std::io::Error::new(std::io::ErrorKind::Other, format!("create: {}", e))
+                })?;
 
-            let status = ruleset
-                .restrict_self()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("restrict_self: {}", e)))?;
+            let status = ruleset.restrict_self().map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, format!("restrict_self: {}", e))
+            })?;
 
             println!("Landlock status: {:?}", status);
             Ok(())
@@ -51,8 +55,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     unsafe {
         cmd2.pre_exec(|| {
-            use std::collections::BTreeMap;
             use seccompiler::{SeccompAction, SeccompFilter, TargetArch};
+            use std::collections::BTreeMap;
 
             let rules: BTreeMap<i64, Vec<seccompiler::SeccompRule>> = BTreeMap::new();
 
@@ -61,16 +65,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 rules,
                 SeccompAction::Errno(libc::EPERM as u32),
                 SeccompAction::Allow,
-                TargetArch::aarch64,  // Adjust based on arch
+                TargetArch::aarch64, // Adjust based on arch
             )
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("SeccompFilter::new: {:?}", e)))?;
+            .map_err(|e| {
+                std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("SeccompFilter::new: {:?}", e),
+                )
+            })?;
 
-            let program: seccompiler::BpfProgram = filter
-                .try_into()
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("BpfProgram: {:?}", e)))?;
+            let program: seccompiler::BpfProgram = filter.try_into().map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, format!("BpfProgram: {:?}", e))
+            })?;
 
-            seccompiler::apply_filter(&program)
-                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, format!("apply_filter: {:?}", e)))?;
+            seccompiler::apply_filter(&program).map_err(|e| {
+                std::io::Error::new(std::io::ErrorKind::Other, format!("apply_filter: {:?}", e))
+            })?;
 
             Ok(())
         });

@@ -8,8 +8,8 @@ use std::process::{Command, Output, Stdio};
 
 use crate::config::SandboxConfigData;
 use crate::error::{Error, Result};
-use crate::platform::{Backend, Child};
 use crate::platform::linux::landlock_rules::LandlockConfig;
+use crate::platform::{Backend, Child};
 
 /// Minimum required kernel version for full security (Landlock ABI v4)
 const MIN_KERNEL_VERSION: KernelVersion = KernelVersion::new(6, 7, 0);
@@ -63,10 +63,7 @@ impl KernelVersion {
         let minor: u32 = parts[1]
             .parse()
             .map_err(|_| Error::InitFailed(format!("Invalid minor version: {}", parts[1])))?;
-        let patch: u32 = parts
-            .get(2)
-            .and_then(|p| p.parse().ok())
-            .unwrap_or(0);
+        let patch: u32 = parts.get(2).and_then(|p| p.parse().ok()).unwrap_or(0);
 
         Ok(Self {
             major,
@@ -126,7 +123,7 @@ impl LinuxBackend {
     }
 
     fn detect_landlock_abi() -> Result<i32> {
-        use landlock::{Access, RulesetAttr, ABI};
+        use landlock::{ABI, Access, RulesetAttr};
 
         // Try to detect the best available ABI
         // We test by creating a ruleset - restrict_self() is tested in a forked child
@@ -134,42 +131,43 @@ impl LinuxBackend {
         let abi = ABI::V4; // We require V4
 
         // Create a minimal ruleset to check if this ABI is supported
-        let ruleset = match landlock::Ruleset::default().handle_access(landlock::AccessFs::from_all(abi)) {
-            Ok(r) => r,
-            Err(_) => {
-                // Try to detect what version is actually available
-                return if landlock::Ruleset::default()
-                    .handle_access(landlock::AccessFs::from_all(ABI::V3))
-                    .is_ok()
-                {
-                    Err(Error::UnsupportedPlatformVersion {
-                        platform: "Linux (Landlock ABI)",
-                        minimum: "4",
-                        current: "3".to_string(),
-                    })
-                } else if landlock::Ruleset::default()
-                    .handle_access(landlock::AccessFs::from_all(ABI::V2))
-                    .is_ok()
-                {
-                    Err(Error::UnsupportedPlatformVersion {
-                        platform: "Linux (Landlock ABI)",
-                        minimum: "4",
-                        current: "2".to_string(),
-                    })
-                } else if landlock::Ruleset::default()
-                    .handle_access(landlock::AccessFs::from_all(ABI::V1))
-                    .is_ok()
-                {
-                    Err(Error::UnsupportedPlatformVersion {
-                        platform: "Linux (Landlock ABI)",
-                        minimum: "4",
-                        current: "1".to_string(),
-                    })
-                } else {
-                    Err(Error::NotEnforced("Landlock not available in kernel"))
-                };
-            }
-        };
+        let ruleset =
+            match landlock::Ruleset::default().handle_access(landlock::AccessFs::from_all(abi)) {
+                Ok(r) => r,
+                Err(_) => {
+                    // Try to detect what version is actually available
+                    return if landlock::Ruleset::default()
+                        .handle_access(landlock::AccessFs::from_all(ABI::V3))
+                        .is_ok()
+                    {
+                        Err(Error::UnsupportedPlatformVersion {
+                            platform: "Linux (Landlock ABI)",
+                            minimum: "4",
+                            current: "3".to_string(),
+                        })
+                    } else if landlock::Ruleset::default()
+                        .handle_access(landlock::AccessFs::from_all(ABI::V2))
+                        .is_ok()
+                    {
+                        Err(Error::UnsupportedPlatformVersion {
+                            platform: "Linux (Landlock ABI)",
+                            minimum: "4",
+                            current: "2".to_string(),
+                        })
+                    } else if landlock::Ruleset::default()
+                        .handle_access(landlock::AccessFs::from_all(ABI::V1))
+                        .is_ok()
+                    {
+                        Err(Error::UnsupportedPlatformVersion {
+                            platform: "Linux (Landlock ABI)",
+                            minimum: "4",
+                            current: "1".to_string(),
+                        })
+                    } else {
+                        Err(Error::NotEnforced("Landlock not available in kernel"))
+                    };
+                }
+            };
 
         // Actually create the ruleset to verify it works
         let _created = ruleset.create().map_err(|e| {
@@ -182,7 +180,9 @@ impl LinuxBackend {
         // This is critical because Landlock restrictions are inherited by child processes
         // We must test with actual path rules, not just an empty ruleset
         match unsafe { libc::fork() } {
-            -1 => Err(Error::InitFailed("fork failed for Landlock test".to_string())),
+            -1 => Err(Error::InitFailed(
+                "fork failed for Landlock test".to_string(),
+            )),
             0 => {
                 // Child process - test restrict_self() with real rules and exit with status code
                 use landlock::{PathBeneath, PathFd, RulesetCreatedAttr, RulesetStatus};
@@ -306,10 +306,7 @@ impl LinuxBackend {
                 pre_exec_write(b"leash: pre_exec start\n");
 
                 let ruleset = landlock_ruleset.take().ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "Landlock ruleset already used",
-                    )
+                    std::io::Error::new(std::io::ErrorKind::Other, "Landlock ruleset already used")
                 })?;
 
                 if let Err(err) = ruleset.restrict_self() {
@@ -328,10 +325,7 @@ impl LinuxBackend {
                 pre_exec_write(b"leash: landlock applied\n");
 
                 let filter = seccomp_filter.take().ok_or_else(|| {
-                    std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "Seccomp filter already used",
-                    )
+                    std::io::Error::new(std::io::ErrorKind::Other, "Seccomp filter already used")
                 })?;
 
                 if let Err(err) = filter.apply() {

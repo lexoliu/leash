@@ -72,7 +72,11 @@ fn build_payload(cli: &Cli) -> Result<Vec<u8>, String> {
         rmp_serde::to_vec(&value).map_err(|e| format!("serialization failed: {e}"))
     } else if !cli.args.is_empty() {
         // Check if first arg starts with "--" (key-value mode) or not (positional mode)
-        let first_is_flag = cli.args.first().map(|s| s.starts_with("--")).unwrap_or(false);
+        let first_is_flag = cli
+            .args
+            .first()
+            .map(|s| s.starts_with("--"))
+            .unwrap_or(false);
 
         if first_is_flag {
             // Parse key-value pairs from trailing args
@@ -183,8 +187,8 @@ fn send_request(socket_path: &str, method: &str, params: &[u8]) -> Result<String
 
     if success {
         // Deserialize MessagePack to JSON value
-        let value: serde_json::Value =
-            rmp_serde::from_slice(payload).map_err(|e| format!("failed to decode response: {e}"))?;
+        let value: serde_json::Value = rmp_serde::from_slice(payload)
+            .map_err(|e| format!("failed to decode response: {e}"))?;
         // Output as pretty JSON
         serde_json::to_string_pretty(&value).map_err(|e| format!("JSON encoding failed: {e}"))
     } else {
