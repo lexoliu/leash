@@ -2,6 +2,22 @@
 
 A cross-platform Rust library for running LLM-generated code in secure sandboxes with native OS-level isolation.
 
+## Why leash
+Docker is a great tool for running containers, with isolation provided by the Linux kernel. However, it has to rely on virtualization to provide isolation on non-Linux platforms, which blocks it to provide GPU and NPU access.
+
+Leash is built at the top of native OS-level isolation mechanisms, such as `sandbox-exec` on macOS, `landlock` on Linux, and `AppContainer` on Windows. It reduces some security, but more lightweight and powerful.
+
+## Leash is not designed to be a general sandbox for running untrusted code.
+
+Leash is designed to be a sandbox for running LLM-generated code in a secure environment. It is not designed to be a general sandbox for running untrusted code.
+
+We provide three tier isolation level
+
+- Strict: Most restricted, only allow read/write within sandbox's workdir.
+- Default: Allow read/write within sandbox's workdir, and allow read-only access outside sandbox's workdir.
+- Permissive: Least restricted, allow read/write access to all directories.
+
+
 ## Platform Support
 
 | Platform | Backend | Status |

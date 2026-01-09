@@ -104,11 +104,16 @@
 (allow file-read* (subpath "/opt/homebrew"))
 (allow file-read* (subpath "/usr/local"))
 (allow file-read* (subpath "/Applications"))
-{% else %}
-; Allow file reads broadly - macOS has too many interconnected paths to enumerate
-; Sensitive paths are denied below with specific rules
-(allow file-read*)
-{% endif %}
+    {% else %}
+    ; Allow file reads broadly - macOS has too many interconnected paths to enumerate
+    ; Sensitive paths are denied below with specific rules
+    (allow file-read*)
+    {% endif %}
+
+    {% if writable_file_system %}
+    ; Permissive mode: Allow global write access
+    (allow file-write*)
+    {% endif %}
 
 ; Process execution - restricted to known safe paths
 (allow process-exec (subpath "/bin"))

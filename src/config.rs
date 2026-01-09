@@ -229,12 +229,17 @@ pub struct SandboxConfigData {
     pub(crate) working_dir: PathBuf,
     pub(crate) working_dir_auto_created: bool,
     pub(crate) filesystem_strict: bool,
+    pub(crate) writable_file_system: bool,
     pub(crate) env_passthrough: Vec<String>,
     pub(crate) limits: ResourceLimits,
     pub(crate) ipc: Option<IpcRouter>,
 }
 
 impl SandboxConfigData {
+    pub fn writable_file_system(&self) -> bool {
+        self.writable_file_system
+    }
+
     pub fn security(&self) -> &SecurityConfig {
         &self.security
     }
@@ -292,6 +297,7 @@ pub struct SandboxConfig<N: NetworkPolicy = DenyAll> {
     working_dir: PathBuf,
     working_dir_auto_created: bool,
     filesystem_strict: bool,
+    writable_file_system: bool,
     env_passthrough: Vec<String>,
     limits: ResourceLimits,
     ipc: Option<IpcRouter>,
@@ -329,11 +335,16 @@ impl<N: NetworkPolicy> SandboxConfig<N> {
                 working_dir: self.working_dir,
                 working_dir_auto_created: self.working_dir_auto_created,
                 filesystem_strict: self.filesystem_strict,
+                writable_file_system: self.writable_file_system,
                 env_passthrough: self.env_passthrough,
                 limits: self.limits,
                 ipc: self.ipc,
             },
         )
+    }
+
+    pub fn writable_file_system(&self) -> bool {
+        self.writable_file_system
     }
 
     pub fn network(&self) -> &N {
@@ -392,6 +403,7 @@ pub struct SandboxConfigBuilder<N: NetworkPolicy = DenyAll> {
     python: Option<PythonConfig>,
     working_dir: Option<PathBuf>,
     filesystem_strict: bool,
+    writable_file_system: bool,
     env_passthrough: Vec<String>,
     limits: ResourceLimits,
     ipc: Option<IpcRouter>,
@@ -409,6 +421,7 @@ impl Default for SandboxConfigBuilder<DenyAll> {
             python: None,
             working_dir: None, // Will generate random name on build()
             filesystem_strict: false,
+            writable_file_system: false,
             env_passthrough: Vec::new(),
             limits: ResourceLimits::default(),
             ipc: None,
@@ -429,6 +442,7 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
             python: self.python,
             working_dir: self.working_dir,
             filesystem_strict: self.filesystem_strict,
+            writable_file_system: self.writable_file_system,
             env_passthrough: self.env_passthrough,
             limits: self.limits,
             ipc: self.ipc,
@@ -482,6 +496,12 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
     /// Enable strict filesystem mode (deny reads outside sandbox/allowlist).
     pub fn filesystem_strict(mut self, enabled: bool) -> Self {
         self.filesystem_strict = enabled;
+        self
+    }
+
+    /// Enable globally writable filesystem
+    pub fn writable_file_system(mut self, enabled: bool) -> Self {
+        self.writable_file_system = enabled;
         self
     }
 
@@ -553,6 +573,7 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
             working_dir,
             working_dir_auto_created,
             filesystem_strict: self.filesystem_strict,
+            writable_file_system: self.writable_file_system,
             env_passthrough: self.env_passthrough,
             limits: self.limits,
             ipc: self.ipc,

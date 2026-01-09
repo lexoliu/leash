@@ -17,6 +17,7 @@ struct SandboxProfile {
     working_dir: String,
     python_venv_path: Option<String>,
     filesystem_strict: bool,
+    writable_file_system: bool,
     network_deny_all: bool,
     // Security protection flags
     protect_user_home: bool,
@@ -100,6 +101,7 @@ pub fn generate_profile(config: &SandboxConfigData, proxy_port: u16) -> Result<S
         working_dir: escape_path(config.working_dir()),
         python_venv_path: config.python().map(|p| escape_path(p.venv().path())),
         filesystem_strict: config.filesystem_strict(),
+        writable_file_system: config.writable_file_system(),
         network_deny_all: config.network_deny_all(),
         // Security protection flags
         protect_user_home: security.protect_user_home,

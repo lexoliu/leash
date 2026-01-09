@@ -8,6 +8,17 @@ use leash::{ResourceLimits, SecurityConfig, SecurityConfigBuilder};
 
 use crate::cli::{CommonArgs, NetworkMode, PythonArgs};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Preset {
+    /// Most restricted, only allow read/write within sandbox's workdir.
+    Strict,
+    /// Allow read/write within sandbox's workdir, and allow read-only access outside sandbox's workdir.
+    Default,
+    /// Least restricted, allow read/write access to all directories.
+    Permissive,
+}
+
 /// TOML config file structure
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -39,8 +50,8 @@ pub struct FileConfig {
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct SecuritySection {
-    /// Preset: "strict" or "permissive"
-    pub preset: Option<String>,
+    /// Preset: "strict", "default", or "permissive"
+    pub preset: Option<Preset>,
     pub protect_home: Option<bool>,
     pub protect_credentials: Option<bool>,
     pub protect_cloud_config: Option<bool>,
@@ -108,6 +119,8 @@ pub struct MergedConfig {
     pub keep_working_dir: bool,
     pub env_passthroughs: Vec<String>,
     pub env_set: HashMap<String, String>,
+    pub filesystem_strict: bool,
+    pub writable_file_system: bool,
     pub python: MergedPythonConfig,
 }
 
@@ -167,8 +180,9 @@ pub fn merge_config(file: FileConfig, cli: &CommonArgs) -> Result<MergedConfig> 
     let mut allow_domains = file.allow_domains.unwrap_or_default();
     allow_domains.extend(cli.allow_domains.iter().cloned());
 
-    // Security config
-    let security = build_security_config(&file.security, cli);
+    // Security config & Preset
+    let (security, filesystem_strict, writable_file_system) =
+        build_security_and_preset(&file.security, cli);
 
     // Paths: merge CLI + file
     let mut readable_paths = file.paths.readable.unwrap_or_default();
@@ -223,6 +237,8 @@ pub fn merge_config(file: FileConfig, cli: &CommonArgs) -> Result<MergedConfig> 
         keep_working_dir,
         env_passthroughs,
         env_set,
+        filesystem_strict,
+        writable_file_system,
         python,
     })
 }
@@ -250,12 +266,21 @@ pub fn merge_python_args(config: &mut MergedConfig, args: &PythonArgs) {
     }
 }
 
-fn build_security_config(file: &SecuritySection, cli: &CommonArgs) -> SecurityConfig {
-    // Start with appropriate preset
-    let mut builder = if cli.permissive || file.preset.as_deref() == Some("permissive") {
-        SecurityConfigBuilder::from_permissive()
+fn build_security_and_preset(
+    file: &SecuritySection,
+    cli: &CommonArgs,
+) -> (SecurityConfig, bool, bool) {
+    // Determine preset: CLI > file > default (Default)
+    let preset = if cli.permissive {
+        Preset::Permissive
     } else {
-        SecurityConfigBuilder::default() // strict
+        file.preset.unwrap_or(Preset::Default)
+    };
+
+    let mut builder = match preset {
+        Preset::Strict => SecurityConfigBuilder::default(), // Strict security
+        Preset::Default => SecurityConfigBuilder::default(), // Strict security
+        Preset::Permissive => SecurityConfigBuilder::from_permissive(), // Permissive security
     };
 
     // Apply file config first, then CLI overrides
@@ -360,7 +385,22 @@ fn build_security_config(file: &SecuritySection, cli: &CommonArgs) -> SecurityCo
         builder = builder.allow_hardware(false);
     }
 
-    builder.build()
+    let config = builder.build();
+
+    // Determine filesystem_strict based on preset
+    let filesystem_strict = match preset {
+        Preset::Strict => true,
+        Preset::Default => false,
+        Preset::Permissive => false,
+    };
+
+    // Determine writable_file_system based on preset (only Permissive allows global write)
+    let writable_file_system = match preset {
+        Preset::Permissive => true,
+        _ => false,
+    };
+
+    (config, filesystem_strict, writable_file_system)
 }
 
 fn build_resource_limits(file: &LimitsSection, cli: &CommonArgs) -> ResourceLimits {

@@ -127,7 +127,9 @@ fn build_config<N: leash::NetworkPolicy>(
         .readable_paths(config.readable_paths.iter().cloned())
         .writable_paths(config.writable_paths.iter().cloned())
         .executable_paths(config.executable_paths.iter().cloned())
-        .env_passthroughs(config.env_passthroughs.iter().cloned());
+        .env_passthroughs(config.env_passthroughs.iter().cloned())
+        .filesystem_strict(config.filesystem_strict)
+        .writable_file_system(config.writable_file_system);
 
     // Set working directory if specified
     if let Some(ref dir) = config.working_dir {

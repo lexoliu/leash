@@ -27,7 +27,9 @@ pub struct LandlockConfig {
     network_deny_all: bool,
     python_venv_path: Option<PathBuf>,
     working_dir: PathBuf,
+    working_dir: PathBuf,
     filesystem_strict: bool,
+    writable_file_system: bool,
 }
 
 impl LandlockConfig {
@@ -41,6 +43,7 @@ impl LandlockConfig {
             python_venv_path: config.python().map(|p| p.venv().path().to_path_buf()),
             working_dir: config.working_dir().to_path_buf(),
             filesystem_strict: config.filesystem_strict(),
+            writable_file_system: config.writable_file_system(),
         }
     }
 
@@ -74,6 +77,10 @@ impl LandlockConfig {
 
     pub fn filesystem_strict(&self) -> bool {
         self.filesystem_strict
+    }
+
+    pub fn writable_file_system(&self) -> bool {
+        self.writable_file_system
     }
 }
 
@@ -204,6 +211,11 @@ pub fn build_ruleset(config: &LandlockConfig, proxy_port: u16) -> Result<Prepare
     // --- Python venv if configured ---
     if let Some(venv_path) = config.python_venv_path() {
         add_path_rule(&mut ruleset, venv_path, AccessFs::from_all(abi))?;
+    }
+
+    // --- Global Write Access (Permissive Mode) ---
+    if config.writable_file_system() {
+        add_path_rule(&mut ruleset, "/", AccessFs::from_all(abi))?;
     }
 
     // --- Apply security restrictions ---
