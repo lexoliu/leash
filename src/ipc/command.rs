@@ -17,7 +17,7 @@ use serde::{Serialize, de::DeserializeOwned};
 /// use serde::{Serialize, Deserialize};
 /// use leash::ipc::IpcCommand;
 ///
-/// #[derive(Serialize, Deserialize)]
+/// #[derive(Clone, Serialize, Deserialize)]
 /// struct SearchCommand {
 ///     query: String,
 /// }
@@ -34,8 +34,13 @@ use serde::{Serialize, de::DeserializeOwned};
 ///         "search".to_string()
 ///     }
 ///
-///     fn primary_arg(&self) -> Option<Cow<'static, str>> {
-///         Some(Cow::Borrowed("query"))  // Enables: search "rust" → search --query "rust"
+///     fn positional_args(&self) -> Cow<'static, [Cow<'static, str>]> {
+///         Cow::Borrowed(&[Cow::Borrowed("query")])  // Enables: search "rust" → search --query "rust"
+///     }
+///
+///     fn apply_args(&mut self, params: &[u8]) -> Result<(), rmp_serde::decode::Error> {
+///         *self = rmp_serde::from_slice(params)?;
+///         Ok(())
 ///     }
 ///
 ///     async fn handle(&mut self) -> SearchResult {
@@ -44,7 +49,7 @@ use serde::{Serialize, de::DeserializeOwned};
 ///     }
 /// }
 /// ```
-pub trait IpcCommand: Serialize + DeserializeOwned + Send + 'static {
+pub trait IpcCommand: Serialize + Send + 'static {
     /// The response type returned by this command
     type Response: Serialize + DeserializeOwned + Send;
 
@@ -53,13 +58,25 @@ pub trait IpcCommand: Serialize + DeserializeOwned + Send + 'static {
     /// This name is used to route incoming requests to the correct handler.
     fn name(&self) -> String;
 
-    /// Primary argument name for positional argument conversion.
+    /// Positional argument names for CLI conversion.
     ///
-    /// When set, the wrapper script will convert positional arguments to named arguments:
-    /// `command <value>` → `leash-ipc command --<primary_arg> "<value>"`
+    /// Returns a list of argument names that map to positional arguments in order.
+    /// The wrapper script converts positional args to named args:
+    /// - `["query"]` → `command "foo"` becomes `command --query "foo"`
+    /// - `["subagent", "prompt"]` → `command research "task"` becomes `command --subagent research --prompt "task"`
     ///
-    /// Returns `None` by default (no conversion).
-    fn primary_arg(&self) -> Option<Cow<'static, str>> {
+    /// Returns empty slice by default (no positional argument conversion).
+    fn positional_args(&self) -> Cow<'static, [Cow<'static, str>]> {
+        Cow::Borrowed(&[])
+    }
+
+    /// Stdin argument name for piped input.
+    ///
+    /// When set, the wrapper script will capture stdin and pass it as this argument:
+    /// `cat file | command "prompt"` → `leash-ipc command --<stdin_arg> "<stdin>" --<primary_arg> "prompt"`
+    ///
+    /// Returns `None` by default (stdin is ignored).
+    fn stdin_arg(&self) -> Option<Cow<'static, str>> {
         None
     }
 
@@ -77,4 +94,14 @@ pub trait IpcCommand: Serialize + DeserializeOwned + Send + 'static {
     /// The handler has mutable access to the command data, allowing it to
     /// modify state if needed during processing.
     fn handle(&mut self) -> impl Future<Output = Self::Response> + Send;
+
+    /// Apply arguments from serialized params to this command.
+    ///
+    /// The router calls this after cloning the command to apply request-specific
+    /// arguments while preserving stateful data (registries, connections, etc.).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the params cannot be applied.
+    fn apply_args(&mut self, params: &[u8]) -> Result<(), rmp_serde::decode::Error>;
 }

@@ -19,8 +19,8 @@ pub struct DomainRequest {
 }
 
 impl DomainRequest {
-    /// Create a new domain request (internal use)
-    pub(crate) fn new(target: String, port: u16, direction: ConnectionDirection, pid: u32) -> Self {
+    /// Create a new domain request.
+    pub fn new(target: String, port: u16, direction: ConnectionDirection, pid: u32) -> Self {
         Self {
             target,
             port,
@@ -120,7 +120,7 @@ impl NetworkPolicy for AllowList {
 pub struct CustomPolicy<F, Fut>
 where
     F: Fn(&DomainRequest) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = bool> + Send + Sync + 'static,
+    Fut: Future<Output = bool> + Send + 'static,
 {
     handler: F,
     _marker: PhantomData<fn() -> Fut>,
@@ -129,7 +129,7 @@ where
 impl<F, Fut> CustomPolicy<F, Fut>
 where
     F: Fn(&DomainRequest) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = bool> + Send + Sync + 'static,
+    Fut: Future<Output = bool> + Send + 'static,
 {
     /// Create a new custom policy with the given handler function
     pub fn new(handler: F) -> Self {
@@ -143,7 +143,7 @@ where
 impl<F, Fut> NetworkPolicy for CustomPolicy<F, Fut>
 where
     F: Fn(&DomainRequest) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = bool> + Send + Sync + 'static,
+    Fut: Future<Output = bool> + Send + 'static,
 {
     async fn check(&self, request: &DomainRequest) -> bool {
         (self.handler)(request).await

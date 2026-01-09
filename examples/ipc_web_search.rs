@@ -12,7 +12,7 @@ use leash::{IpcCommand, IpcRouter, Sandbox, SandboxConfig};
 use serde::{Deserialize, Serialize};
 
 /// WebSearch command - sent from sandbox to host
-#[derive(Debug, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct WebSearch {
     query: String,
 }
@@ -34,6 +34,11 @@ impl IpcCommand for WebSearch {
 
     fn name(&self) -> String {
         "web_search".to_string()
+    }
+
+    fn apply_args(&mut self, params: &[u8]) -> Result<(), leash::rmp_serde::decode::Error> {
+        *self = leash::rmp_serde::from_slice(params)?;
+        Ok(())
     }
 
     async fn handle(&mut self) -> WebSearchResult {

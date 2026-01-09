@@ -14,8 +14,10 @@ type ErasedHandler = Box<
 
 /// Metadata about a registered command
 pub struct CommandMeta {
-    /// Primary argument name for positional argument conversion
-    pub primary_arg: Option<String>,
+    /// Positional argument names in order (e.g., ["query"] or ["subagent", "prompt"])
+    pub positional_args: Vec<String>,
+    /// Stdin argument name for piped input
+    pub stdin_arg: Option<String>,
 }
 
 /// Router that dispatches IPC requests to registered command handlers
@@ -36,29 +38,31 @@ impl IpcRouter {
         }
     }
 
-    /// Register a command instance
+    /// Register a command instance.
     ///
-    /// The command's name is obtained from `cmd.name()`, and its type is used
-    /// to deserialize incoming requests. The instance itself is only used to
-    /// get the name and infer the type.
+    /// The command is cloned for each request, preserving any stateful data
+    /// (like registries, connections, etc.) while applying request arguments.
     ///
     /// # Example
     ///
     /// ```rust,ignore
     /// let router = IpcRouter::new()
-    ///     .register(SearchCommand::default())
-    ///     .register(ExecuteCommand::default());
+    ///     .register(SearchCommand::new(api_key))
+    ///     .register(TasksCommand::new(registry));
     /// ```
-    pub fn register<C: IpcCommand>(mut self, cmd: C) -> Self {
+    pub fn register<C: IpcCommand + Clone + Sync>(mut self, cmd: C) -> Self {
         let name = cmd.name();
-        let primary_arg = cmd.primary_arg();
+        let positional_args = cmd.positional_args();
+        let stdin_arg = cmd.stdin_arg();
         let method_name = name.clone();
 
+        // Clone the command for each request, preserving state
         let handler: ErasedHandler = Box::new(move |params: &[u8]| {
+            let mut cmd = cmd.clone();
             let params = params.to_vec();
             let method_name = method_name.clone();
             Box::pin(async move {
-                let mut cmd: C = rmp_serde::from_slice(&params)?;
+                cmd.apply_args(&params)?;
                 cmd.set_method_name(&method_name);
                 let response = cmd.handle().await;
                 let bytes = rmp_serde::to_vec(&response)?;
@@ -69,7 +73,8 @@ impl IpcRouter {
         self.metadata.insert(
             name.clone(),
             CommandMeta {
-                primary_arg: primary_arg.map(|c| c.into_owned()),
+                positional_args: positional_args.iter().map(|c| c.to_string()).collect(),
+                stdin_arg: stdin_arg.map(|c| c.into_owned()),
             },
         );
         self.handlers.insert(name, handler);
@@ -105,7 +110,7 @@ mod tests {
     use super::*;
     use serde::{Deserialize, Serialize};
 
-    #[derive(Debug, Serialize, Deserialize)]
+    #[derive(Debug, Clone, Serialize, Deserialize)]
     struct TestCommand {
         value: i32,
     }
@@ -120,6 +125,11 @@ mod tests {
 
         fn name(&self) -> String {
             "test".to_string()
+        }
+
+        fn apply_args(&mut self, params: &[u8]) -> Result<(), rmp_serde::decode::Error> {
+            *self = rmp_serde::from_slice(params)?;
+            Ok(())
         }
 
         async fn handle(&mut self) -> TestResponse {

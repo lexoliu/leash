@@ -1,9 +1,13 @@
 use std::path::{Path, PathBuf};
 use std::process::Output;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use executor_core::async_executor::AsyncExecutor;
 use executor_core::{try_init_global_executor, DefaultExecutor, Executor};
+
+/// Counter for generating unique socket names within a process.
+static SOCKET_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 use crate::command::Command;
 use crate::config::{SandboxConfig, SandboxConfigData};
@@ -21,12 +25,56 @@ struct SimpleWrapperTemplate<'a> {
     command: &'a str,
 }
 
-/// Template for IPC wrapper with primary argument conversion
+/// Template for IPC wrapper with stdin piping support
 #[derive(Template)]
-#[template(path = "ipc/wrapper_primary_arg.sh", escape = "none")]
-struct PrimaryArgWrapperTemplate<'a> {
+#[template(path = "ipc/wrapper_stdin.sh", escape = "none")]
+struct StdinWrapperTemplate<'a> {
     command: &'a str,
     primary_arg: &'a str,
+    stdin_arg: &'a str,
+}
+
+/// Generate a wrapper script for positional arguments.
+///
+/// Handles N positional arguments by assigning them to named args in order.
+/// The last positional arg captures all remaining arguments with `$*`.
+fn generate_positional_wrapper(command: &str, positional_args: &[String]) -> String {
+    let args_comment = positional_args.join(", ");
+    let mut script = format!(
+        r#"#!/bin/sh
+# {command} - positional args: [{args_comment}]
+
+# If first arg is a flag, pass through directly
+if [ $# -gt 0 ] && [ "${{1#-}}" != "$1" ]; then
+    exec leash-ipc {command} "$@"
+fi
+
+"#
+    );
+
+    // Generate variable assignments for all but last arg
+    for (i, _arg) in positional_args.iter().enumerate().take(positional_args.len().saturating_sub(1))
+    {
+        script.push_str(&format!(
+            r#"arg{i}="$1"
+shift 2>/dev/null || true
+"#
+        ));
+    }
+
+    // Build the exec command
+    let mut exec_parts = vec![format!("leash-ipc {command}")];
+    for (i, arg) in positional_args.iter().enumerate() {
+        if i < positional_args.len() - 1 {
+            exec_parts.push(format!("--{arg} \"$arg{i}\""));
+        } else {
+            // Last arg gets all remaining with $*
+            exec_parts.push(format!("--{arg} \"$*\""));
+        }
+    }
+
+    script.push_str(&format!("\nexec {}\n", exec_parts.join(" ")));
+    script
 }
 
 /// Create a wrapper script for an IPC command.
@@ -34,30 +82,52 @@ struct PrimaryArgWrapperTemplate<'a> {
 /// The wrapper script calls `leash-ipc <command> "$@"` to forward arguments
 /// to the IPC handler running on the host.
 ///
-/// If `primary_arg` is provided, positional arguments are converted:
-/// - `command <value>` → `leash-ipc command --<primary_arg> "<value>"`
-fn create_ipc_wrapper(bin_dir: &Path, command: &str, primary_arg: Option<&str>) -> Result<()> {
+/// If `positional_args` is provided, positional arguments are converted to named args:
+/// - `["query"]` → `command "foo"` becomes `command --query "foo"`
+/// - `["subagent", "prompt"]` → `command a "b"` becomes `command --subagent a --prompt "b"`
+///
+/// If `stdin_arg` is provided, stdin content is captured and passed as that argument.
+fn create_ipc_wrapper(
+    bin_dir: &Path,
+    command: &str,
+    positional_args: &[String],
+    stdin_arg: Option<&str>,
+) -> Result<()> {
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     let script_path = bin_dir.join(command);
 
-    let script_content = if let Some(arg_name) = primary_arg {
-        PrimaryArgWrapperTemplate {
-            command,
-            primary_arg: arg_name,
-        }
-        .render()
-        .map_err(|e| Error::IoError(format!("template render failed: {e}")))?
-    } else {
-        SimpleWrapperTemplate { command }
+    let script_content = match (positional_args.len(), stdin_arg) {
+        (_, Some(stdin)) if !positional_args.is_empty() => {
+            // Stdin + positional args - use template with first positional arg
+            StdinWrapperTemplate {
+                command,
+                primary_arg: &positional_args[0],
+                stdin_arg: stdin,
+            }
             .render()
             .map_err(|e| Error::IoError(format!("template render failed: {e}")))?
+        }
+        (0, _) => {
+            // No positional args - simple passthrough
+            SimpleWrapperTemplate { command }
+                .render()
+                .map_err(|e| Error::IoError(format!("template render failed: {e}")))?
+        }
+        _ => {
+            // Positional args without stdin - generate dynamic script
+            generate_positional_wrapper(command, positional_args)
+        }
     };
 
     fs::write(&script_path, script_content).map_err(|e| {
-        Error::IoError(format!("failed to create IPC wrapper {}: {}", script_path.display(), e))
+        Error::IoError(format!(
+            "failed to create IPC wrapper {}: {}",
+            script_path.display(),
+            e
+        ))
     })?;
 
     // Make executable on Unix
@@ -211,13 +281,22 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
         // Start IPC server if configured
         let ipc_server = if let Some(router) = config_data.ipc.take() {
             let leash_dir = working_dir_path.join(".leash");
-            let socket_path = leash_dir.join("ipc.sock");
+            // Use /tmp for socket to avoid path length limits (SUN_LEN is ~104 bytes)
+            // Format: /tmp/leash-{pid}-{counter}.sock
+            let socket_id = SOCKET_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let socket_name = format!("leash-{}-{}.sock", std::process::id(), socket_id);
+            let socket_path = std::env::temp_dir().join(socket_name);
 
             // Create wrapper scripts for each IPC command
             let bin_dir = leash_dir.join("bin");
             std::fs::create_dir_all(&bin_dir)?;
             for (method, meta) in router.methods() {
-                create_ipc_wrapper(&bin_dir, method, meta.primary_arg.as_deref())?;
+                create_ipc_wrapper(
+                    &bin_dir,
+                    method,
+                    &meta.positional_args,
+                    meta.stdin_arg.as_deref(),
+                )?;
             }
             tracing::debug!(bin_dir = %bin_dir.display(), "created IPC wrapper scripts");
 

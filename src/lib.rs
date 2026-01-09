@@ -80,6 +80,8 @@ pub use config::{
 };
 pub use error::{Error, Result};
 pub use ipc::{IpcCommand, IpcError, IpcRouter};
+/// Re-export rmp_serde for IpcCommand::apply_args implementations.
+pub use rmp_serde;
 pub use network::{
     AllowAll, AllowList, ConnectionDirection, CustomPolicy, DenyAll, DomainRequest, NetworkPolicy,
 };
