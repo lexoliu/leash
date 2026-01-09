@@ -14,7 +14,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let status = match smol::block_on(sandbox.command("echo").args(["hello"]).status()) {
         Ok(status) => status,
         Err(e) => {
-            eprintln!("Failed: {:?}", e);
+            eprintln!("Failed with error: {:#?}", e);
+            if let Some(source) = std::error::Error::source(&e) {
+                eprintln!("Caused by: {:#?}", source);
+            }
             return Err(e.into());
         }
     };
