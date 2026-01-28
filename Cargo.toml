@@ -35,6 +35,7 @@ executor-core = { version = "0.7", features = ["async-executor", "std"] }
 async-net = "2"
 async-io = "2"
 futures-lite = "2"
+blocking = "1"
 
 # Compile-time templates
 askama = "0.12"

@@ -6,6 +6,8 @@ mod seccomp_filter;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Output, Stdio};
 
+use blocking::unblock;
+
 use crate::config::SandboxConfigData;
 use crate::error::{Error, Result};
 use crate::platform::linux::landlock_rules::LandlockConfig;
@@ -387,7 +389,7 @@ impl Backend for LinuxBackend {
             "About to spawn command"
         );
 
-        let output = cmd.output()?;
+        let output = unblock(move || cmd.output()).await?;
 
         tracing::debug!(
             program = %program,

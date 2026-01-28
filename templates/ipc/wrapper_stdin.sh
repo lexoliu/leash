@@ -9,14 +9,14 @@ fi
 
 if [ -n "$STDIN_CONTENT" ]; then
     if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
-        exec leash-ipc {{ command }} --{{ stdin_arg }} "$STDIN_CONTENT" --{{ primary_arg }} "$*"
+        exec leash-ipc {{ command }} -- --{{ stdin_arg }} "$STDIN_CONTENT" --{{ primary_arg }} "$*"
     else
-        exec leash-ipc {{ command }} --{{ stdin_arg }} "$STDIN_CONTENT" "$@"
+        exec leash-ipc {{ command }} -- --{{ stdin_arg }} "$STDIN_CONTENT" "$@"
     fi
 else
     if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
-        exec leash-ipc {{ command }} --{{ primary_arg }} "$*"
+        exec leash-ipc {{ command }} -- --{{ primary_arg }} "$*"
     else
-        exec leash-ipc {{ command }} "$@"
-    fi
+        exec leash-ipc {{ command }} -- "$@"
+fi
 fi

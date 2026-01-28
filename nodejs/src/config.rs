@@ -26,20 +26,20 @@ impl ResourceLimitsJs {
     pub fn into_rust(self) -> leash::ResourceLimits {
         let mut builder = leash::ResourceLimits::builder();
 
-        if let Some(v) = self.max_memory_bytes {
-            if v > 0 {
-                builder = builder.max_memory_bytes(v as u64);
-            }
+        if let Some(v) = self.max_memory_bytes
+            && v > 0
+        {
+            builder = builder.max_memory_bytes(v as u64);
         }
-        if let Some(v) = self.max_cpu_time_secs {
-            if v > 0 {
-                builder = builder.max_cpu_time_secs(v as u64);
-            }
+        if let Some(v) = self.max_cpu_time_secs
+            && v > 0
+        {
+            builder = builder.max_cpu_time_secs(v as u64);
         }
-        if let Some(v) = self.max_file_size_bytes {
-            if v > 0 {
-                builder = builder.max_file_size_bytes(v as u64);
-            }
+        if let Some(v) = self.max_file_size_bytes
+            && v > 0
+        {
+            builder = builder.max_file_size_bytes(v as u64);
         }
         if let Some(v) = self.max_processes {
             builder = builder.max_processes(v);

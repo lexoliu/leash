@@ -4,3 +4,4 @@
 nodejs/node_modules/
 nodejs/*.node
 nodejs/npm-debug.log*
+.DS_Store

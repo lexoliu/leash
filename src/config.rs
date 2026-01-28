@@ -233,6 +233,9 @@ pub struct SandboxConfigData {
     pub(crate) env_passthrough: Vec<String>,
     pub(crate) limits: ResourceLimits,
     pub(crate) ipc: Option<IpcRouter>,
+    /// Whether to allow writing to /dev/tty (controlling terminal).
+    /// When false, all output must go through stdout/stderr pipes.
+    pub(crate) allow_tty_write: bool,
 }
 
 impl SandboxConfigData {
@@ -283,6 +286,10 @@ impl SandboxConfigData {
     pub fn ipc(&self) -> Option<&IpcRouter> {
         self.ipc.as_ref()
     }
+
+    pub fn allow_tty_write(&self) -> bool {
+        self.allow_tty_write
+    }
 }
 
 /// Main sandbox configuration
@@ -301,6 +308,7 @@ pub struct SandboxConfig<N: NetworkPolicy = DenyAll> {
     env_passthrough: Vec<String>,
     limits: ResourceLimits,
     ipc: Option<IpcRouter>,
+    allow_tty_write: bool,
 }
 
 impl SandboxConfig<DenyAll> {
@@ -339,6 +347,7 @@ impl<N: NetworkPolicy> SandboxConfig<N> {
                 env_passthrough: self.env_passthrough,
                 limits: self.limits,
                 ipc: self.ipc,
+                allow_tty_write: self.allow_tty_write,
             },
         )
     }
@@ -407,6 +416,7 @@ pub struct SandboxConfigBuilder<N: NetworkPolicy = DenyAll> {
     env_passthrough: Vec<String>,
     limits: ResourceLimits,
     ipc: Option<IpcRouter>,
+    allow_tty_write: bool,
 }
 
 impl Default for SandboxConfigBuilder<DenyAll> {
@@ -425,6 +435,7 @@ impl Default for SandboxConfigBuilder<DenyAll> {
             env_passthrough: Vec::new(),
             limits: ResourceLimits::default(),
             ipc: None,
+            allow_tty_write: false, // Default: deny /dev/tty writes to capture all output
         }
     }
 }
@@ -446,6 +457,7 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
             env_passthrough: self.env_passthrough,
             limits: self.limits,
             ipc: self.ipc,
+            allow_tty_write: self.allow_tty_write,
         }
     }
 
@@ -536,6 +548,16 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
         self
     }
 
+    /// Allow writing to /dev/tty (controlling terminal)
+    ///
+    /// When false (default), sandboxed processes cannot write directly to the terminal,
+    /// ensuring all output goes through captured stdout/stderr.
+    /// Enable this for interactive sessions that need terminal access.
+    pub fn allow_tty_write(mut self, enabled: bool) -> Self {
+        self.allow_tty_write = enabled;
+        self
+    }
+
     pub fn build(self) -> Result<SandboxConfig<N>> {
         // Resolve working directory: use specified path or create random one
         let working_dir_auto_created = self.working_dir.is_none();
@@ -577,6 +599,7 @@ impl<N: NetworkPolicy> SandboxConfigBuilder<N> {
             env_passthrough: self.env_passthrough,
             limits: self.limits,
             ipc: self.ipc,
+            allow_tty_write: self.allow_tty_write,
         })
     }
 }

@@ -3,6 +3,7 @@ use std::process::Output;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
+use blocking::unblock;
 use executor_core::async_executor::AsyncExecutor;
 use executor_core::{DefaultExecutor, Executor, try_init_global_executor};
 
@@ -46,7 +47,7 @@ fn generate_positional_wrapper(command: &str, positional_args: &[String]) -> Str
 
 # If first arg is a flag, pass through directly
 if [ $# -gt 0 ] && [ "${{1#-}}" != "$1" ]; then
-    exec leash-ipc {command} "$@"
+    exec leash-ipc {command} -- "$@"
 fi
 
 "#
@@ -66,7 +67,7 @@ shift 2>/dev/null || true
     }
 
     // Build the exec command
-    let mut exec_parts = vec![format!("leash-ipc {command}")];
+    let mut exec_parts = vec![format!("leash-ipc {command} --")];
     for (i, arg) in positional_args.iter().enumerate() {
         if i < positional_args.len() - 1 {
             exec_parts.push(format!("--{arg} \"$arg{i}\""));
@@ -82,7 +83,7 @@ shift 2>/dev/null || true
 
 /// Create a wrapper script for an IPC command.
 ///
-/// The wrapper script calls `leash-ipc <command> "$@"` to forward arguments
+/// The wrapper script calls `leash-ipc <command> -- "$@"` to forward arguments
 /// to the IPC handler running on the host.
 ///
 /// If `positional_args` is provided, positional arguments are converted to named args:
@@ -292,16 +293,31 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
 
             // Create wrapper scripts for each IPC command
             let bin_dir = leash_dir.join("bin");
-            std::fs::create_dir_all(&bin_dir)?;
-            for (method, meta) in router.methods() {
-                create_ipc_wrapper(
-                    &bin_dir,
-                    method,
-                    &meta.positional_args,
-                    meta.stdin_arg.as_deref(),
-                )?;
-            }
-            tracing::debug!(bin_dir = %bin_dir.display(), "created IPC wrapper scripts");
+            let bin_dir_for_log = bin_dir.clone();
+            let method_metadata: Vec<(String, Vec<String>, Option<String>)> = router
+                .methods()
+                .map(|(method, meta)| {
+                    (
+                        method.to_string(),
+                        meta.positional_args.clone(),
+                        meta.stdin_arg.clone(),
+                    )
+                })
+                .collect();
+            unblock(move || -> crate::error::Result<()> {
+                std::fs::create_dir_all(&bin_dir)?;
+                for (method, positional_args, stdin_arg) in method_metadata {
+                    create_ipc_wrapper(
+                        &bin_dir,
+                        &method,
+                        &positional_args,
+                        stdin_arg.as_deref(),
+                    )?;
+                }
+                Ok(())
+            })
+            .await?;
+            tracing::debug!(bin_dir = %bin_dir_for_log.display(), "created IPC wrapper scripts");
 
             let server = IpcServer::new(router, &socket_path, executor).await?;
             tracing::info!(socket_path = %socket_path.display(), "IPC server started");

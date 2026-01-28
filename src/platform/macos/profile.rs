@@ -33,6 +33,8 @@ struct SandboxProfile {
     allow_npu: bool,
     allow_hardware: bool,
     proxy_port: u16,
+    // Terminal access
+    allow_tty_write: bool,
 }
 
 /// Generate an SBPL profile from sandbox configuration
@@ -117,6 +119,8 @@ pub fn generate_profile(config: &SandboxConfigData, proxy_port: u16) -> Result<S
         allow_npu: security.allow_npu,
         allow_hardware: security.allow_hardware,
         proxy_port,
+        // Terminal access
+        allow_tty_write: config.allow_tty_write(),
     };
 
     let profile = template.render().map_err(|e| {

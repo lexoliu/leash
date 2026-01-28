@@ -1,6 +1,8 @@
 use std::future::Future;
 use std::process::{ExitStatus, Output, Stdio};
 
+use blocking::unblock;
+
 use crate::config::SandboxConfigData;
 use crate::error::Result;
 use crate::sandbox::ProcessTracker;
@@ -16,15 +18,18 @@ pub mod windows;
 
 /// A spawned child process in the sandbox
 pub struct Child {
-    inner: std::process::Child,
+    inner: Option<std::process::Child>,
     tracker: Option<ProcessTracker>,
+    pid: u32,
 }
 
 impl Child {
     pub(crate) fn new(inner: std::process::Child) -> Self {
+        let pid = inner.id();
         Self {
-            inner,
+            inner: Some(inner),
             tracker: None,
+            pid,
         }
     }
 
@@ -41,55 +46,66 @@ impl Child {
 
     /// Access the child's stdin
     pub fn stdin(&mut self) -> Option<&mut std::process::ChildStdin> {
-        self.inner.stdin.as_mut()
+        self.inner.as_mut().and_then(|child| child.stdin.as_mut())
     }
 
     /// Access the child's stdout
     pub fn stdout(&mut self) -> Option<&mut std::process::ChildStdout> {
-        self.inner.stdout.as_mut()
+        self.inner.as_mut().and_then(|child| child.stdout.as_mut())
     }
 
     /// Access the child's stderr
     pub fn stderr(&mut self) -> Option<&mut std::process::ChildStderr> {
-        self.inner.stderr.as_mut()
+        self.inner.as_mut().and_then(|child| child.stderr.as_mut())
     }
 
     /// Take ownership of the child's stdin
     pub fn take_stdin(&mut self) -> Option<std::process::ChildStdin> {
-        self.inner.stdin.take()
+        self.inner.as_mut().and_then(|child| child.stdin.take())
     }
 
     /// Take ownership of the child's stdout
     pub fn take_stdout(&mut self) -> Option<std::process::ChildStdout> {
-        self.inner.stdout.take()
+        self.inner.as_mut().and_then(|child| child.stdout.take())
     }
 
     /// Take ownership of the child's stderr
     pub fn take_stderr(&mut self) -> Option<std::process::ChildStderr> {
-        self.inner.stderr.take()
+        self.inner.as_mut().and_then(|child| child.stderr.take())
     }
 
     /// Get the process ID
     pub fn id(&self) -> u32 {
-        self.inner.id()
+        self.pid
     }
 
     /// Wait for the child to exit
     pub async fn wait(&mut self) -> Result<ExitStatus> {
-        // For now, use blocking wait wrapped in a poll
-        // In a real implementation, this would use async I/O
-        let status = self.inner.wait()?;
-        self.unregister_if_tracked();
-        Ok(status)
+        let pid = self.pid;
+        let tracker = self.tracker.take();
+        let mut inner = self
+            .inner
+            .take()
+            .expect("child process no longer available");
+        let (inner, status) = unblock(move || {
+            let status = inner.wait();
+            (inner, status)
+        })
+        .await;
+        self.inner = Some(inner);
+        if let Some(tracker) = tracker {
+            tracker.unregister(pid);
+        }
+        Ok(status?)
     }
 
     /// Wait for the child to exit and collect all output
     pub async fn wait_with_output(self) -> Result<Output> {
-        // For now, use blocking wait_with_output
-        // In a real implementation, this would use async I/O
-        let pid = self.inner.id();
-        let output = self.inner.wait_with_output()?;
-        if let Some(tracker) = self.tracker {
+        let inner = self.inner.expect("child process no longer available");
+        let pid = inner.id();
+        let tracker = self.tracker;
+        let output = unblock(move || inner.wait_with_output()).await?;
+        if let Some(tracker) = tracker {
             tracker.unregister(pid);
         }
         Ok(output)
@@ -97,12 +113,20 @@ impl Child {
 
     /// Attempt to kill the child process
     pub fn kill(&mut self) -> Result<()> {
-        Ok(self.inner.kill()?)
+        let inner = self
+            .inner
+            .as_mut()
+            .expect("child process no longer available");
+        Ok(inner.kill()?)
     }
 
     /// Check if the child has exited without blocking
     pub fn try_wait(&mut self) -> Result<Option<ExitStatus>> {
-        let status = self.inner.try_wait()?;
+        let inner = self
+            .inner
+            .as_mut()
+            .expect("child process no longer available");
+        let status = inner.try_wait()?;
         if status.is_some() {
             self.unregister_if_tracked();
         }

@@ -2,12 +2,14 @@
 //!
 //! Unix domain socket server for handling IPC requests from sandboxed processes.
 
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use async_net::unix::UnixListener;
+use blocking::unblock;
 use executor_core::{Executor, Task};
 use futures_lite::StreamExt;
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
@@ -39,13 +41,21 @@ impl IpcServer {
         let router = Arc::new(router);
         let running = Arc::new(AtomicBool::new(true));
 
-        // Remove existing socket file if present
-        let _ = std::fs::remove_file(&socket_path);
+        // Remove existing socket file if present and create parent directory
+        let socket_path_clone = socket_path.clone();
+        unblock(move || {
+            match std::fs::remove_file(&socket_path_clone) {
+                Ok(()) => {}
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+                Err(err) => return Err(err),
+            }
 
-        // Create parent directory if needed
-        if let Some(parent) = socket_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
+            if let Some(parent) = socket_path_clone.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            Ok(())
+        })
+        .await?;
 
         // Bind the listener
         let listener = UnixListener::bind(&socket_path)?;

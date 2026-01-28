@@ -4,6 +4,8 @@ pub use profile::generate_profile;
 
 use std::process::{Command, Output, Stdio};
 
+use blocking::unblock;
+
 use crate::config::SandboxConfigData;
 use crate::error::{Error, Result};
 use crate::platform::{Backend, Child};
@@ -132,7 +134,7 @@ impl Backend for MacOSBackend {
             stderr,
         )?;
 
-        let output = cmd.output()?;
+        let output = unblock(move || cmd.output()).await?;
 
         tracing::debug!(
             program = %program,

@@ -146,7 +146,7 @@
 (allow file-write-unlink (subpath "/private/var/folders"))
 
 ; =============================================================================
-; Device access - minimal set for stdio, randomness, and TTY
+; Device access - minimal set for stdio and randomness
 ; =============================================================================
 (allow file-read* (literal "/dev/null"))
 (allow file-read* (literal "/dev/zero"))
@@ -159,12 +159,15 @@
 (allow file-write* (literal "/dev/null"))
 (allow file-write* (literal "/dev/zero"))
 (allow file-write* (subpath "/dev/fd"))
+{% if allow_tty_write %}
+; TTY write access enabled (for interactive sessions)
 (allow file-write* (literal "/dev/tty"))
 (allow file-write* (regex #"^/dev/ttys[0-9]+$"))
 (allow file-write* (regex #"^/dev/pty[pq][0-9a-f]+$"))
 (allow file-ioctl (literal "/dev/tty"))
 (allow file-ioctl (regex #"^/dev/ttys[0-9]+$"))
 (allow file-ioctl (regex #"^/dev/pty[pq][0-9a-f]+$"))
+{% endif %}
 
 ; =============================================================================
 ; User-configured paths

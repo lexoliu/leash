@@ -3,6 +3,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use blocking::unblock;
+
 use crate::config::VenvConfig;
 use crate::error::{Error, Result};
 
@@ -82,7 +84,7 @@ impl VenvManager {
             cmd.arg("--system-site-packages");
         }
 
-        let output = cmd.output()?;
+        let output = unblock(move || cmd.output()).await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -123,7 +125,7 @@ impl VenvManager {
             cmd.arg("--system-site-packages");
         }
 
-        let output = cmd.output()?;
+        let output = unblock(move || cmd.output()).await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -154,7 +156,7 @@ impl VenvManager {
             .arg(&self.python_path)
             .args(packages);
 
-        let output = cmd.output()?;
+        let output = unblock(move || cmd.output()).await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -177,7 +179,7 @@ impl VenvManager {
         let mut cmd = Command::new(&self.python_path);
         cmd.arg("-m").arg("pip").arg("install").args(packages);
 
-        let output = cmd.output()?;
+        let output = unblock(move || cmd.output()).await?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
