@@ -8,6 +8,8 @@
 use std::collections::HashMap;
 use std::env;
 use std::io::{Read, Write};
+use std::net::TcpStream;
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
 use std::process::ExitCode;
 
@@ -77,10 +79,33 @@ fn build_payload(cli: &Cli) -> Result<Vec<u8>, String> {
 }
 
 fn send_request(socket_path: &str, method: &str, params: &[u8]) -> Result<String, String> {
-    // Connect to the socket
-    let mut stream =
-        UnixStream::connect(socket_path).map_err(|e| format!("failed to connect: {e}"))?;
+    if let Some(address) = socket_path.strip_prefix("tcp://") {
+        let mut stream =
+            TcpStream::connect(address).map_err(|e| format!("failed to connect: {e}"))?;
+        return send_request_with_stream(&mut stream, method, params);
+    }
 
+    #[cfg(unix)]
+    {
+        let mut stream =
+            UnixStream::connect(socket_path).map_err(|e| format!("failed to connect: {e}"))?;
+        return send_request_with_stream(&mut stream, method, params);
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = (method, params);
+        Err(format!(
+            "unix socket transport is not supported on this platform: {socket_path}"
+        ))
+    }
+}
+
+fn send_request_with_stream<S: Read + Write>(
+    stream: &mut S,
+    method: &str,
+    params: &[u8],
+) -> Result<String, String> {
     // Build the request:
     // [4 bytes: total length (u32 BE)]
     // [1 byte: method length (u8)]

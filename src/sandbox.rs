@@ -38,7 +38,8 @@ struct StdinWrapperTemplate<'a> {
 /// Generate a wrapper script for positional arguments.
 ///
 /// Handles N positional arguments by assigning them to named args in order.
-/// The last positional arg captures all remaining arguments with `$*`.
+/// Each positional arg is shifted off and converted to `--name "$arg"`.
+/// Any remaining arguments (flags like `--options A`) are passed through via `"$@"`.
 fn generate_positional_wrapper(command: &str, positional_args: &[String]) -> String {
     let args_comment = positional_args.join(", ");
     let mut script = format!(
@@ -53,12 +54,8 @@ fi
 "#
     );
 
-    // Generate variable assignments for all but last arg
-    for (i, _arg) in positional_args
-        .iter()
-        .enumerate()
-        .take(positional_args.len().saturating_sub(1))
-    {
+    // Generate variable assignments: shift each positional arg
+    for (i, _arg) in positional_args.iter().enumerate() {
         script.push_str(&format!(
             r#"arg{i}="$1"
 shift 2>/dev/null || true
@@ -66,16 +63,12 @@ shift 2>/dev/null || true
         ));
     }
 
-    // Build the exec command
+    // Build the exec command: named positional args + remaining "$@" for extra flags
     let mut exec_parts = vec![format!("leash-ipc {command} --")];
     for (i, arg) in positional_args.iter().enumerate() {
-        if i < positional_args.len() - 1 {
-            exec_parts.push(format!("--{arg} \"$arg{i}\""));
-        } else {
-            // Last arg gets all remaining with $*
-            exec_parts.push(format!("--{arg} \"$*\""));
-        }
+        exec_parts.push(format!("--{arg} \"$arg{i}\""));
     }
+    exec_parts.push("\"$@\"".to_string());
 
     script.push_str(&format!("\nexec {}\n", exec_parts.join(" ")));
     script
@@ -307,12 +300,7 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
             unblock(move || -> crate::error::Result<()> {
                 std::fs::create_dir_all(&bin_dir)?;
                 for (method, positional_args, stdin_arg) in method_metadata {
-                    create_ipc_wrapper(
-                        &bin_dir,
-                        &method,
-                        &positional_args,
-                        stdin_arg.as_deref(),
-                    )?;
+                    create_ipc_wrapper(&bin_dir, &method, &positional_args, stdin_arg.as_deref())?;
                 }
                 Ok(())
             })
