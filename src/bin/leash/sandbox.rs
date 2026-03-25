@@ -1,7 +1,9 @@
 use leash::{
-    AllowAll, AllowList, Command, DenyAll, PtyExitStatus, PythonConfig, Sandbox, SandboxConfig,
-    SandboxConfigBuilder, VenvConfig,
+    AllowAll, AllowList, Command, DenyAll, PythonConfig, Sandbox, SandboxConfig,
+    SandboxConfigBuilder, StdioConfig, VenvConfig,
 };
+#[cfg(target_os = "macos")]
+use leash::PtyExitStatus;
 
 use crate::cli::NetworkMode;
 use crate::config::MergedConfig;
@@ -40,6 +42,26 @@ impl SandboxHandle {
                 s.keep_working_dir();
             }
         }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub async fn run_shell(
+        &self,
+        program: &str,
+        args: &[String],
+        envs: &[(String, String)],
+    ) -> leash::Result<std::process::ExitStatus> {
+        let mut command = self.command(program);
+        command = command.args(args);
+        for (key, value) in envs {
+            command = command.env(key, value);
+        }
+        command
+            .stdin(StdioConfig::Inherit)
+            .stdout(StdioConfig::Inherit)
+            .stderr(StdioConfig::Inherit)
+            .status()
+            .await
     }
 
     /// Run an interactive command with PTY support

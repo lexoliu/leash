@@ -21,10 +21,7 @@ pub enum CliError {
     },
 
     #[error("failed to read config file {path}: {source}")]
-    ReadConfig {
-        path: PathBuf,
-        source: io::Error,
-    },
+    ReadConfig { path: PathBuf, source: io::Error },
 
     #[error("failed to parse config file {path}: {source}")]
     ParseConfig {
@@ -63,10 +60,7 @@ pub enum CliError {
     },
 
     #[error("IPC transport error on {endpoint}: {source}")]
-    IpcTransport {
-        endpoint: String,
-        source: io::Error,
-    },
+    IpcTransport { endpoint: String, source: io::Error },
 
     #[error("invalid IPC response length: {length}")]
     InvalidIpcResponseLength { length: usize },

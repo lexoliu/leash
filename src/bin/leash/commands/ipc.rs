@@ -75,10 +75,11 @@ fn send_request(endpoint: &str, method: &str, params: &[u8]) -> CliResult<String
 
     #[cfg(unix)]
     {
-        let mut stream = UnixStream::connect(endpoint).map_err(|source| CliError::IpcTransport {
-            endpoint: endpoint.to_string(),
-            source,
-        })?;
+        let mut stream =
+            UnixStream::connect(endpoint).map_err(|source| CliError::IpcTransport {
+                endpoint: endpoint.to_string(),
+                source,
+            })?;
         return send_request_with_stream(&mut stream, method, params);
     }
 
@@ -110,10 +111,12 @@ fn send_request_with_stream<S: Read + Write>(
     request.extend_from_slice(method_bytes);
     request.extend_from_slice(params);
 
-    stream.write_all(&request).map_err(|source| CliError::IpcTransport {
-        endpoint: "request-write".to_string(),
-        source,
-    })?;
+    stream
+        .write_all(&request)
+        .map_err(|source| CliError::IpcTransport {
+            endpoint: "request-write".to_string(),
+            source,
+        })?;
 
     let mut len_buf = [0u8; 4];
     stream
@@ -173,9 +176,8 @@ fn send_request_with_stream<S: Read + Write>(
             }
         }
     } else {
-        let error = rmp_serde::from_slice::<String>(payload).unwrap_or_else(|_| {
-            String::from_utf8_lossy(payload).to_string()
-        });
+        let error = rmp_serde::from_slice::<String>(payload)
+            .unwrap_or_else(|_| String::from_utf8_lossy(payload).to_string());
         Err(CliError::Message { message: error })
     }
 }

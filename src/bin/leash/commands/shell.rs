@@ -11,11 +11,10 @@ pub async fn execute(args: ShellArgs, config: MergedConfig) -> CliResult<()> {
             sandbox.keep_working_dir();
         }
 
-        // Use bash by default for predictable sandbox behavior
         let shell = args
             .shell
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| "/bin/bash".to_string());
+            .map(|path| path.to_string_lossy().to_string())
+            .unwrap_or_else(default_shell);
 
         // Build environment variables from config
         let envs: Vec<(String, String)> = config
@@ -24,11 +23,31 @@ pub async fn execute(args: ShellArgs, config: MergedConfig) -> CliResult<()> {
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
 
-        // Run the shell with PTY support for proper terminal handling
-        let status = sandbox.run_interactive(&shell, &[], &envs)?;
-        status.code()
+        #[cfg(target_os = "macos")]
+        {
+            let status = sandbox.run_interactive(&shell, &[], &envs)?;
+            status.code()
+        }
+
+        #[cfg(not(target_os = "macos"))]
+        {
+            let status = sandbox.run_shell(&shell, &[], &envs).await?;
+            status.code().unwrap_or(1)
+        }
         // sandbox dropped here, working dir cleaned up
     };
 
     std::process::exit(exit_code);
+}
+
+fn default_shell() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
+    }
 }
