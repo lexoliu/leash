@@ -1,19 +1,19 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use anyhow::{Context, Result};
 use serde::Deserialize;
 
 use leash::{ResourceLimits, SecurityConfig, SecurityConfigBuilder};
 
 use crate::cli::{CommonArgs, NetworkMode, PythonArgs};
+use crate::error::{CliError, CliResult};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Preset {
     /// Most restricted, only allow read/write within sandbox's workdir.
     Strict,
-    /// Allow read/write within sandbox's workdir, and allow read-only access outside sandbox's workdir.
+    /// Secure default for untrusted code (strict filesystem + sensitive-data protections).
     Default,
     /// Least restricted, allow read/write access to all directories.
     Permissive,
@@ -147,13 +147,18 @@ impl Default for MergedPythonConfig {
 }
 
 /// Load config from file
-pub fn load_config(path: Option<&Path>) -> Result<FileConfig> {
+pub fn load_config(path: Option<&Path>) -> CliResult<FileConfig> {
     match path {
         Some(path) => {
-            let content = std::fs::read_to_string(path)
-                .with_context(|| format!("failed to read config file: {}", path.display()))?;
-            let config: FileConfig = toml::from_str(&content)
-                .with_context(|| format!("failed to parse config file: {}", path.display()))?;
+            let content = std::fs::read_to_string(path).map_err(|source| CliError::ReadConfig {
+                path: path.to_path_buf(),
+                source,
+            })?;
+            let config: FileConfig =
+                toml::from_str(&content).map_err(|source| CliError::ParseConfig {
+                    path: path.to_path_buf(),
+                    source,
+                })?;
             Ok(config)
         }
         None => Ok(FileConfig::default()),
@@ -161,7 +166,7 @@ pub fn load_config(path: Option<&Path>) -> Result<FileConfig> {
 }
 
 /// Merge file config with CLI args (CLI takes precedence)
-pub fn merge_config(file: FileConfig, cli: &CommonArgs) -> Result<MergedConfig> {
+pub fn merge_config(file: FileConfig, cli: &CommonArgs) -> CliResult<MergedConfig> {
     // Network mode: CLI > file > default (deny)
     let network_mode = if cli.network != NetworkMode::Deny {
         cli.network
@@ -170,7 +175,11 @@ pub fn merge_config(file: FileConfig, cli: &CommonArgs) -> Result<MergedConfig> 
             "deny" => NetworkMode::Deny,
             "allow" => NetworkMode::Allow,
             "allow-list" => NetworkMode::AllowList,
-            other => anyhow::bail!("invalid network mode in config: {}", other),
+            other => {
+                return Err(CliError::InvalidNetworkMode {
+                    value: other.to_string(),
+                });
+            }
         }
     } else {
         NetworkMode::Deny
@@ -211,7 +220,9 @@ pub fn merge_config(file: FileConfig, cli: &CommonArgs) -> Result<MergedConfig> 
         if let Some((key, value)) = env_str.split_once('=') {
             env_set.insert(key.to_string(), value.to_string());
         } else {
-            anyhow::bail!("invalid env format (expected KEY=VALUE): {}", env_str);
+            return Err(CliError::InvalidEnvFormat {
+                value: env_str.clone(),
+            });
         }
     }
 
@@ -390,7 +401,7 @@ fn build_security_and_preset(
     // Determine filesystem_strict based on preset
     let filesystem_strict = match preset {
         Preset::Strict => true,
-        Preset::Default => false,
+        Preset::Default => true,
         Preset::Permissive => false,
     };
 

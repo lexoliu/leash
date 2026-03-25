@@ -12,6 +12,22 @@ type ErasedHandler = Box<
     dyn Fn(&[u8]) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, IpcError>> + Send>> + Send + Sync,
 >;
 
+fn is_valid_identifier(value: &str) -> bool {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(first) if first.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+}
+
+fn assert_valid_identifier(kind: &str, value: &str) {
+    assert!(
+        is_valid_identifier(value),
+        "invalid IPC {kind} '{value}': expected [A-Za-z][A-Za-z0-9_-]*"
+    );
+}
+
 /// Metadata about a registered command
 pub struct CommandMeta {
     /// Positional argument names in order (e.g., ["query"] or ["subagent", "prompt"])
@@ -54,6 +70,16 @@ impl IpcRouter {
         let name = cmd.name();
         let positional_args = cmd.positional_args();
         let stdin_arg = cmd.stdin_arg();
+        assert_valid_identifier("command name", &name);
+        let positional_args: Vec<String> =
+            positional_args.iter().map(|arg| arg.to_string()).collect();
+        for positional_arg in &positional_args {
+            assert_valid_identifier("positional argument name", positional_arg);
+        }
+        let stdin_arg = stdin_arg.map(|arg| arg.into_owned());
+        if let Some(ref stdin_arg) = stdin_arg {
+            assert_valid_identifier("stdin argument name", stdin_arg);
+        }
         let method_name = name.clone();
 
         // Clone the command for each request, preserving state
@@ -73,8 +99,8 @@ impl IpcRouter {
         self.metadata.insert(
             name.clone(),
             CommandMeta {
-                positional_args: positional_args.iter().map(|c| c.to_string()).collect(),
-                stdin_arg: stdin_arg.map(|c| c.into_owned()),
+                positional_args,
+                stdin_arg,
             },
         );
         self.handlers.insert(name, handler);
@@ -139,24 +165,51 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_router_dispatch() {
-        let router = IpcRouter::new().register(TestCommand { value: 0 });
+    #[test]
+    fn test_router_dispatch() {
+        smol::block_on(async {
+            let router = IpcRouter::new().register(TestCommand { value: 0 });
 
-        let cmd = TestCommand { value: 21 };
-        let params = rmp_serde::to_vec(&cmd).unwrap();
+            let cmd = TestCommand { value: 21 };
+            let params = rmp_serde::to_vec(&cmd).unwrap();
 
-        let response_bytes = router.handle("test", &params).await.unwrap();
-        let response: TestResponse = rmp_serde::from_slice(&response_bytes).unwrap();
+            let response_bytes = router.handle("test", &params).await.unwrap();
+            let response: TestResponse = rmp_serde::from_slice(&response_bytes).unwrap();
 
-        assert_eq!(response, TestResponse { doubled: 42 });
+            assert_eq!(response, TestResponse { doubled: 42 });
+        });
     }
 
-    #[tokio::test]
-    async fn test_router_unknown_method() {
-        let router = IpcRouter::new();
+    #[test]
+    fn test_router_unknown_method() {
+        smol::block_on(async {
+            let router = IpcRouter::new();
 
-        let result = router.handle("unknown", &[]).await;
-        assert!(matches!(result, Err(IpcError::UnknownMethod(_))));
+            let result = router.handle("unknown", &[]).await;
+            assert!(matches!(result, Err(IpcError::UnknownMethod(_))));
+        });
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    struct InvalidNameCommand;
+
+    impl IpcCommand for InvalidNameCommand {
+        type Response = ();
+
+        fn name(&self) -> String {
+            "bad/name".to_string()
+        }
+
+        fn apply_args(&mut self, _params: &[u8]) -> Result<(), rmp_serde::decode::Error> {
+            Ok(())
+        }
+
+        async fn handle(&mut self) -> Self::Response {}
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid IPC command name")]
+    fn test_router_rejects_invalid_command_name() {
+        let _ = IpcRouter::new().register(InvalidNameCommand);
     }
 }

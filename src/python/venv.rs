@@ -64,7 +64,7 @@ impl VenvManager {
 
     /// Check if uv is available
     fn has_uv() -> bool {
-        which::which("uv").is_ok()
+        resolve_tool("uv").is_some()
     }
 
     /// Create venv using uv (faster)
@@ -108,8 +108,8 @@ impl VenvManager {
         let python = config
             .python()
             .map(|p| p.to_path_buf())
-            .or_else(|| which::which("python3").ok())
-            .or_else(|| which::which("python").ok())
+            .or_else(|| resolve_tool("python3"))
+            .or_else(|| resolve_tool("python"))
             .ok_or(Error::PythonNotFound)?;
 
         tracing::debug!(
@@ -247,6 +247,16 @@ impl VenvManager {
     pub fn site_packages_path(&self) -> &Path {
         &self.site_packages_path
     }
+}
+
+#[cfg(feature = "python")]
+fn resolve_tool(name: &str) -> Option<PathBuf> {
+    which::which(name).ok()
+}
+
+#[cfg(not(feature = "python"))]
+fn resolve_tool(_name: &str) -> Option<PathBuf> {
+    None
 }
 
 #[cfg(test)]

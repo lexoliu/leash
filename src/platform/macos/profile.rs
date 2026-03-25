@@ -16,7 +16,6 @@ struct SandboxProfile {
     executable_paths: Vec<String>,
     working_dir: String,
     python_venv_path: Option<String>,
-    filesystem_strict: bool,
     writable_file_system: bool,
     network_deny_all: bool,
     // Security protection flags
@@ -33,6 +32,7 @@ struct SandboxProfile {
     allow_npu: bool,
     allow_hardware: bool,
     proxy_port: u16,
+    ipc_port: Option<u16>,
     // Terminal access
     allow_tty_write: bool,
 }
@@ -44,6 +44,11 @@ struct SandboxProfile {
 pub fn generate_profile(config: &SandboxConfigData, proxy_port: u16) -> Result<String> {
     // Log the configuration
     tracing::debug!("sandbox policy: deny all by default");
+    if config.filesystem_strict() {
+        tracing::warn!(
+            "macOS backend ignores filesystem_strict and uses broad reads with explicit sensitive-path denies"
+        );
+    }
 
     for path in config.readable_paths() {
         tracing::debug!(path = %path.display(), "sandbox: allow read");
@@ -102,7 +107,6 @@ pub fn generate_profile(config: &SandboxConfigData, proxy_port: u16) -> Result<S
             .collect(),
         working_dir: escape_path(config.working_dir()),
         python_venv_path: config.python().map(|p| escape_path(p.venv().path())),
-        filesystem_strict: config.filesystem_strict(),
         writable_file_system: config.writable_file_system(),
         network_deny_all: config.network_deny_all(),
         // Security protection flags
@@ -119,6 +123,7 @@ pub fn generate_profile(config: &SandboxConfigData, proxy_port: u16) -> Result<S
         allow_npu: security.allow_npu,
         allow_hardware: security.allow_hardware,
         proxy_port,
+        ipc_port: config.ipc_port(),
         // Terminal access
         allow_tty_write: config.allow_tty_write(),
     };
@@ -185,9 +190,10 @@ mod tests {
 
         assert!(profile.contains("(version 1)"));
         assert!(profile.contains("(deny default)"));
+        assert!(profile.contains("(allow file-read*)"));
         assert!(profile.contains("(deny network*)"));
         // Verify deny-all has no allow rule for proxy
-        assert!(!profile.contains("(allow network* (remote ip \"localhost:12345\"))"));
+        assert!(!profile.contains("(allow network-outbound (remote ip \"localhost:12345\"))"));
 
         // Clean up the random working directory
         std::fs::remove_dir(&working_dir).ok();
@@ -201,7 +207,7 @@ mod tests {
         let profile = generate_profile(&config_data, 23456).unwrap();
 
         assert!(profile.contains("(deny network*)"));
-        assert!(profile.contains("(allow network* (remote ip \"localhost:23456\"))"));
+        assert!(profile.contains("(allow network-outbound (remote ip \"localhost:23456\"))"));
 
         // Clean up the random working directory
         std::fs::remove_dir(&working_dir).ok();

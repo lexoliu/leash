@@ -1,14 +1,11 @@
 use std::path::{Path, PathBuf};
+use std::process::Command as ProcessCommand;
 use std::process::Output;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use blocking::unblock;
 use executor_core::async_executor::AsyncExecutor;
 use executor_core::{DefaultExecutor, Executor, try_init_global_executor};
-
-/// Counter for generating unique socket names within a process.
-static SOCKET_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 use crate::command::Command;
 use crate::config::{SandboxConfig, SandboxConfigData};
@@ -26,6 +23,21 @@ struct SimpleWrapperTemplate<'a> {
     command: &'a str,
 }
 
+#[derive(Clone)]
+struct PositionalWrapperArg {
+    name: String,
+    shell_var: String,
+    shell_ref: String,
+}
+
+/// Template for IPC wrapper with positional argument support
+#[derive(Template)]
+#[template(path = "ipc/wrapper_positional.sh", escape = "none")]
+struct PositionalWrapperTemplate<'a> {
+    command: &'a str,
+    positional_args: &'a [PositionalWrapperArg],
+}
+
 /// Template for IPC wrapper with stdin piping support
 #[derive(Template)]
 #[template(path = "ipc/wrapper_stdin.sh", escape = "none")]
@@ -35,48 +47,16 @@ struct StdinWrapperTemplate<'a> {
     stdin_arg: &'a str,
 }
 
-/// Generate a wrapper script for positional arguments.
-///
-/// Handles N positional arguments by assigning them to named args in order.
-/// Each positional arg is shifted off and converted to `--name "$arg"`.
-/// Any remaining arguments (flags like `--options A`) are passed through via `"$@"`.
-fn generate_positional_wrapper(command: &str, positional_args: &[String]) -> String {
-    let args_comment = positional_args.join(", ");
-    let mut script = format!(
-        r#"#!/bin/sh
-# {command} - positional args: [{args_comment}]
-
-# If first arg is a flag, pass through directly
-if [ $# -gt 0 ] && [ "${{1#-}}" != "$1" ]; then
-    exec leash-ipc {command} -- "$@"
-fi
-
-"#
-    );
-
-    // Generate variable assignments: shift each positional arg
-    for (i, _arg) in positional_args.iter().enumerate() {
-        script.push_str(&format!(
-            r#"arg{i}="$1"
-shift 2>/dev/null || true
-"#
-        ));
-    }
-
-    // Build the exec command: named positional args + remaining "$@" for extra flags
-    let mut exec_parts = vec![format!("leash-ipc {command} --")];
-    for (i, arg) in positional_args.iter().enumerate() {
-        exec_parts.push(format!("--{arg} \"$arg{i}\""));
-    }
-    exec_parts.push("\"$@\"".to_string());
-
-    script.push_str(&format!("\nexec {}\n", exec_parts.join(" ")));
-    script
+/// Template for the `leash` launcher placed inside `.leash/bin`.
+#[derive(Template)]
+#[template(path = "ipc/leash_launcher.sh", escape = "none")]
+struct LeashLauncherTemplate<'a> {
+    binary: &'a str,
 }
 
 /// Create a wrapper script for an IPC command.
 ///
-/// The wrapper script calls `leash-ipc <command> -- "$@"` to forward arguments
+/// The wrapper script calls `leash ipc <command> -- "$@"` to forward arguments
 /// to the IPC handler running on the host.
 ///
 /// If `positional_args` is provided, positional arguments are converted to named args:
@@ -114,8 +94,22 @@ fn create_ipc_wrapper(
                 .map_err(|e| Error::IoError(format!("template render failed: {e}")))?
         }
         _ => {
-            // Positional args without stdin - generate dynamic script
-            generate_positional_wrapper(command, positional_args)
+            // Positional args without stdin - render static template
+            let positional_args: Vec<PositionalWrapperArg> = positional_args
+                .iter()
+                .enumerate()
+                .map(|(index, name)| PositionalWrapperArg {
+                    name: name.clone(),
+                    shell_var: format!("arg{index}"),
+                    shell_ref: format!("$arg{index}"),
+                })
+                .collect();
+            PositionalWrapperTemplate {
+                command,
+                positional_args: &positional_args,
+            }
+            .render()
+            .map_err(|e| Error::IoError(format!("template render failed: {e}")))?
         }
     };
 
@@ -133,12 +127,208 @@ fn create_ipc_wrapper(
         let mut perms = fs::metadata(&script_path)
             .map_err(|e| Error::IoError(format!("failed to get permissions: {}", e)))?
             .permissions();
-        perms.set_mode(0o755);
+        perms.set_mode(0o700);
         fs::set_permissions(&script_path, perms)
             .map_err(|e| Error::IoError(format!("failed to set permissions: {}", e)))?;
     }
 
     Ok(())
+}
+
+fn search_path_for_binary(name: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .map(|dir| dir.join(name))
+        .find(|candidate| candidate.is_file())
+}
+
+fn bundled_leash_path() -> PathBuf {
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push("target");
+    path.push("debug");
+    let mut binary_name = String::from("leash");
+    binary_name.push_str(std::env::consts::EXE_SUFFIX);
+    path.push(binary_name);
+    path
+}
+
+fn path_modified_time(path: &Path) -> Result<std::time::SystemTime> {
+    std::fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .map_err(|error| {
+            Error::InitFailed(format!(
+                "failed to read modification time for {}: {error}",
+                path.display()
+            ))
+        })
+}
+
+fn newest_modified_time(path: &Path) -> Result<std::time::SystemTime> {
+    let metadata = std::fs::metadata(path).map_err(|error| {
+        Error::InitFailed(format!(
+            "failed to read metadata for {}: {error}",
+            path.display()
+        ))
+    })?;
+    let mut newest = metadata.modified().map_err(|error| {
+        Error::InitFailed(format!(
+            "failed to read modification time for {}: {error}",
+            path.display()
+        ))
+    })?;
+
+    if metadata.is_dir() {
+        for entry in std::fs::read_dir(path).map_err(|error| {
+            Error::InitFailed(format!(
+                "failed to read directory {}: {error}",
+                path.display()
+            ))
+        })? {
+            let entry = entry.map_err(|error| {
+                Error::InitFailed(format!(
+                    "failed to read directory entry in {}: {error}",
+                    path.display()
+                ))
+            })?;
+            let child_modified = newest_modified_time(&entry.path())?;
+            if child_modified > newest {
+                newest = child_modified;
+            }
+        }
+    }
+
+    Ok(newest)
+}
+
+fn bundled_leash_is_fresh(binary: &Path) -> Result<bool> {
+    if !binary.is_file() {
+        return Ok(false);
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let binary_modified = path_modified_time(binary)?;
+    let dependency_paths = [
+        manifest_dir.join("Cargo.toml"),
+        manifest_dir.join("Cargo.lock"),
+        manifest_dir.join("src"),
+        manifest_dir.join("templates"),
+        manifest_dir.join("cli").join("Cargo.toml"),
+        manifest_dir.join("cli").join("src"),
+    ];
+
+    for path in dependency_paths {
+        if newest_modified_time(&path)? > binary_modified {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+fn ensure_bundled_leash_binary() -> Result<PathBuf> {
+    let bundled = bundled_leash_path();
+    if bundled_leash_is_fresh(&bundled)? {
+        return Ok(bundled);
+    }
+
+    let cargo = std::env::var_os("CARGO")
+        .map(PathBuf::from)
+        .or_else(|| search_path_for_binary("cargo"))
+        .ok_or_else(|| {
+            Error::InitFailed("failed to resolve cargo while preparing leash".to_string())
+        })?;
+
+    let status = ProcessCommand::new(&cargo)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .arg("build")
+        .arg("-p")
+        .arg("leash-cli")
+        .status()
+        .map_err(|error| {
+            Error::InitFailed(format!(
+                "failed to start cargo build for leash using '{}': {error}",
+                cargo.display()
+            ))
+        })?;
+
+    if !status.success() {
+        return Err(Error::InitFailed(format!(
+            "cargo build -p leash-cli exited with status {status}"
+        )));
+    }
+
+    if bundled.is_file() {
+        Ok(bundled)
+    } else {
+        Err(Error::InitFailed(format!(
+            "cargo reported success but leash binary is missing at {}",
+            bundled.display()
+        )))
+    }
+}
+
+fn resolve_leash_binary() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("LEASH_BIN") {
+        let resolved = PathBuf::from(path);
+        if resolved.is_file() {
+            return Ok(resolved);
+        }
+        return Err(Error::InitFailed(format!(
+            "LEASH_BIN points to a missing file: {}",
+            resolved.display()
+        )));
+    }
+
+    if let Ok(bundled) = ensure_bundled_leash_binary() {
+        return Ok(bundled);
+    }
+
+    search_path_for_binary(&format!("leash{}", std::env::consts::EXE_SUFFIX))
+        .ok_or_else(|| Error::InitFailed("failed to resolve leash binary".to_string()))
+}
+
+fn create_leash_launcher(bin_dir: &Path, binary: &Path) -> Result<()> {
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
+    let launcher_path = bin_dir.join("leash");
+    let escaped = shell_escape::unix::escape(binary.to_string_lossy());
+    let launcher = LeashLauncherTemplate { binary: &escaped }
+        .render()
+        .map_err(|error| Error::IoError(format!("template render failed: {error}")))?;
+
+    fs::write(&launcher_path, launcher).map_err(|error| {
+        Error::IoError(format!(
+            "failed to create IPC launcher {}: {}",
+            launcher_path.display(),
+            error
+        ))
+    })?;
+
+    #[cfg(unix)]
+    {
+        let mut perms = fs::metadata(&launcher_path)
+            .map_err(|error| Error::IoError(format!("failed to get permissions: {error}")))?
+            .permissions();
+        perms.set_mode(0o700);
+        fs::set_permissions(&launcher_path, perms)
+            .map_err(|error| Error::IoError(format!("failed to set permissions: {error}")))?;
+    }
+
+    Ok(())
+}
+
+fn remove_stale_ipc_launcher(bin_dir: &Path) -> Result<()> {
+    let stale_path = bin_dir.join("leash-ipc");
+    match std::fs::remove_file(&stale_path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(Error::IoError(format!(
+            "failed to remove stale IPC launcher {}: {error}",
+            stale_path.display()
+        ))),
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -181,12 +371,31 @@ impl ProcessTracker {
 
     /// Kill all tracked processes
     pub fn kill_all(&self) {
-        if let Ok(pids) = self.pids.lock() {
+        if let Ok(mut pids) = self.pids.lock() {
             for &pid in pids.iter() {
                 tracing::debug!(pid = pid, "killing child process");
                 #[cfg(unix)]
-                unsafe {
-                    libc::kill(pid as i32, libc::SIGKILL);
+                {
+                    // Avoid signaling unrelated reused PIDs: only kill if the PID
+                    // is still one of our unreaped child processes.
+                    let mut status: libc::c_int = 0;
+                    let wait_result =
+                        unsafe { libc::waitpid(pid as i32, &mut status, libc::WNOHANG) };
+                    if wait_result == pid as i32 {
+                        tracing::debug!(pid = pid, "child already exited");
+                        continue;
+                    }
+                    if wait_result == -1 {
+                        let err = std::io::Error::last_os_error();
+                        if err.raw_os_error() == Some(libc::ECHILD) {
+                            tracing::debug!(pid = pid, "skipping non-child PID");
+                            continue;
+                        }
+                    }
+
+                    unsafe {
+                        libc::kill(pid as i32, libc::SIGKILL);
+                    }
                 }
                 #[cfg(windows)]
                 {
@@ -196,6 +405,7 @@ impl ProcessTracker {
                         .output();
                 }
             }
+            pids.clear();
         }
     }
 }
@@ -278,11 +488,8 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
         // Start IPC server if configured
         let ipc_server = if let Some(router) = config_data.ipc.take() {
             let leash_dir = working_dir_path.join(".leash");
-            // Use /tmp for socket to avoid path length limits (SUN_LEN is ~104 bytes)
-            // Format: /tmp/leash-{pid}-{counter}.sock
-            let socket_id = SOCKET_COUNTER.fetch_add(1, Ordering::Relaxed);
-            let socket_name = format!("leash-{}-{}.sock", std::process::id(), socket_id);
-            let socket_path = std::env::temp_dir().join(socket_name);
+            let leash_binary = resolve_leash_binary()?;
+            let leash_binary_for_launcher = leash_binary.clone();
 
             // Create wrapper scripts for each IPC command
             let bin_dir = leash_dir.join("bin");
@@ -299,16 +506,26 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
                 .collect();
             unblock(move || -> crate::error::Result<()> {
                 std::fs::create_dir_all(&bin_dir)?;
+                create_leash_launcher(&bin_dir, &leash_binary_for_launcher)?;
+                remove_stale_ipc_launcher(&bin_dir)?;
                 for (method, positional_args, stdin_arg) in method_metadata {
                     create_ipc_wrapper(&bin_dir, &method, &positional_args, stdin_arg.as_deref())?;
                 }
                 Ok(())
             })
             .await?;
+            if !config_data
+                .executable_paths
+                .iter()
+                .any(|path| path == &leash_binary)
+            {
+                config_data.executable_paths.push(leash_binary.clone());
+            }
             tracing::debug!(bin_dir = %bin_dir_for_log.display(), "created IPC wrapper scripts");
 
-            let server = IpcServer::new(router, &socket_path, executor).await?;
-            tracing::info!(socket_path = %socket_path.display(), "IPC server started");
+            let server = IpcServer::new(router, executor).await?;
+            config_data.set_ipc_port(Some(server.addr().port()));
+            tracing::info!(endpoint = %server.endpoint(), "IPC server started");
             Some(server)
         } else {
             None
@@ -367,18 +584,15 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
     ///
     /// The command will automatically have HTTP_PROXY and HTTPS_PROXY
     /// environment variables set to route traffic through the sandbox's proxy.
-    /// If IPC is configured, LEASH_IPC_SOCKET will also be set.
+    /// If IPC is configured, LEASH_IPC_ENDPOINT will also be set.
     pub fn command(&self, program: impl Into<String>) -> Command<'_> {
-        let ipc_socket_path = self
-            .ipc_server
-            .as_ref()
-            .map(|s| s.socket_path().to_path_buf());
+        let ipc_endpoint = self.ipc_server.as_ref().map(|s| s.endpoint().to_string());
         Command::new(
             &self.config_data,
             &self.backend,
             &self.process_tracker,
             self.proxy.as_ref(),
-            ipc_socket_path,
+            ipc_endpoint,
             program,
         )
     }
@@ -399,9 +613,7 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
             }
         } else {
             // Use system Python
-            which::which("python3")
-                .or_else(|_| which::which("python"))
-                .map_err(|_| crate::error::Error::PythonNotFound)?
+            resolve_python_interpreter().ok_or(crate::error::Error::PythonNotFound)?
         };
 
         self.command(python.to_string_lossy().to_string())
@@ -441,9 +653,11 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
         args: &[String],
         envs: &[(String, String)],
     ) -> Result<crate::pty::PtyExitStatus> {
+        let ipc_endpoint = self.ipc_server.as_ref().map(|s| s.endpoint());
         crate::pty::run_with_pty(
             &self.config_data,
             self.proxy.as_ref(),
+            ipc_endpoint,
             program,
             args,
             envs,
@@ -452,14 +666,26 @@ impl<N: NetworkPolicy + 'static> Sandbox<N> {
     }
 }
 
+#[cfg(feature = "python")]
+fn resolve_python_interpreter() -> Option<std::path::PathBuf> {
+    which::which("python3")
+        .ok()
+        .or_else(|| which::which("python").ok())
+}
+
+#[cfg(not(feature = "python"))]
+fn resolve_python_interpreter() -> Option<std::path::PathBuf> {
+    None
+}
+
 impl<N: NetworkPolicy> Drop for Sandbox<N> {
     fn drop(&mut self) {
-        // Stop the IPC server and remove socket file
+        // Stop the IPC server
         if let Some(ref ipc_server) = self.ipc_server {
             ipc_server.stop();
             tracing::debug!("stopped IPC server");
         }
-        // Drop the IPC server to remove socket file before removing working dir
+        // Drop the IPC server before removing working dir
         self.ipc_server.take();
 
         // Stop the network proxy
@@ -502,27 +728,49 @@ mod tests {
     use super::*;
 
     #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn test_sandbox_creation() {
-        let sandbox = Sandbox::new().await.unwrap();
-        let working_dir = sandbox.working_dir().to_path_buf();
-        assert!(working_dir.exists());
-        drop(sandbox);
-        // Working dir should be deleted after drop
-        assert!(!working_dir.exists());
+    #[test]
+    fn test_sandbox_creation() {
+        smol::block_on(async {
+            let sandbox = Sandbox::new().await.unwrap();
+            let working_dir = sandbox.working_dir().to_path_buf();
+            assert!(working_dir.exists());
+            drop(sandbox);
+            // Working dir should be deleted after drop
+            assert!(!working_dir.exists());
+        });
     }
 
     #[cfg(target_os = "macos")]
-    #[tokio::test]
-    async fn test_keep_working_dir() {
-        let working_dir = {
-            let mut sandbox = Sandbox::new().await.unwrap();
-            sandbox.keep_working_dir();
-            sandbox.working_dir().to_path_buf()
-        };
-        // Working dir should still exist after drop
-        assert!(working_dir.exists());
-        // Clean up manually
-        std::fs::remove_dir(&working_dir).ok();
+    #[test]
+    fn test_keep_working_dir() {
+        smol::block_on(async {
+            let working_dir = {
+                let mut sandbox = Sandbox::new().await.unwrap();
+                sandbox.keep_working_dir();
+                sandbox.working_dir().to_path_buf()
+            };
+            // Working dir should still exist after drop
+            assert!(working_dir.exists());
+            // Clean up manually
+            std::fs::remove_dir(&working_dir).ok();
+        });
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn test_macos_sandbox_executes_bash_pwd() {
+        smol::block_on(async {
+            let sandbox = Sandbox::new().await.unwrap();
+            let output = sandbox
+                .command("bash")
+                .arg("-c")
+                .arg("pwd")
+                .output()
+                .await
+                .unwrap();
+            eprintln!("SANDBOX OUTPUT: {:?}", output);
+            assert!(output.status.success(), "unexpected output: {:?}", output);
+            assert!(!output.stdout.is_empty(), "stdout should not be empty");
+        });
     }
 }

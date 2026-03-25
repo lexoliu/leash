@@ -10,11 +10,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let sandbox = smol::block_on(Sandbox::with_config(config))?;
     println!("Sandbox created at: {:?}", sandbox.working_dir());
 
-    println!("\nRunning simple 'echo' command (stdout/stderr inherited)...");
-    let status = match smol::block_on(sandbox.command("echo").args(["hello"]).status()) {
-        Ok(status) => status,
+    println!("\nRunning simple /bin/echo command (captured output)...");
+    let output = match smol::block_on(sandbox.command("/bin/echo").args(["hello"]).output()) {
+        Ok(output) => output,
         Err(e) => {
-            // Check for environmental errors that we can't fix in CI
             match &e {
                 leash::Error::UnsupportedPlatformVersion { .. }
                 | leash::Error::NotEnforced(_)
@@ -34,7 +33,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("Success!");
-    println!("Exit code: {:?}", status.code());
+    println!("Exit status: {:?}", output.status);
+    println!("Exit code: {:?}", output.status.code());
+    println!("Stdout: {:?}", String::from_utf8_lossy(&output.stdout));
+    println!("Stderr: {:?}", String::from_utf8_lossy(&output.stderr));
 
     Ok(())
 }

@@ -1,7 +1,7 @@
 //! Inter-Process Communication (IPC) for sandbox
 //!
 //! This module provides type-safe IPC between sandboxed processes and the host.
-//! Communication happens over Unix domain sockets using MessagePack serialization.
+//! Communication happens over loopback TCP using MessagePack serialization.
 //!
 //! # Example
 //!

@@ -33,6 +33,7 @@ impl PtyExitStatus {
 pub fn run_with_pty<N: NetworkPolicy>(
     config: &SandboxConfigData,
     proxy: Option<&NetworkProxy<N>>,
+    ipc_endpoint: Option<&str>,
     program: &str,
     args: &[String],
     envs: &[(String, String)],
@@ -90,6 +91,14 @@ pub fn run_with_pty<N: NetworkPolicy>(
 
     for (key, val) in envs {
         cmd = cmd.env(key, val);
+    }
+
+    // Inject IPC endpoint and wrappers path for interactive IPC commands
+    if let Some(endpoint) = ipc_endpoint {
+        let leash_bin = config.working_dir().join(".leash").join("bin");
+        let current_path = std::env::var("PATH").unwrap_or_default();
+        let new_path = format!("{}:{}", leash_bin.display(), current_path);
+        cmd = cmd.env("LEASH_IPC_ENDPOINT", endpoint).env("PATH", new_path);
     }
 
     // Spawn the child process

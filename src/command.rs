@@ -42,14 +42,14 @@ impl From<StdioConfig> for Stdio {
 ///
 /// All network traffic from the command is routed through the sandbox's proxy.
 /// HTTP_PROXY and HTTPS_PROXY environment variables are automatically injected.
-/// If IPC is configured, LEASH_IPC_SOCKET is also injected.
+/// If IPC is configured, LEASH_IPC_ENDPOINT is also injected.
 pub struct Command<'a> {
     config: &'a SandboxConfigData,
     backend: &'a NativeBackend,
     process_tracker: &'a ProcessTracker,
     proxy_url: Option<String>,
     proxy_port: u16,
-    ipc_socket_path: Option<PathBuf>,
+    ipc_endpoint: Option<String>,
     program: String,
     args: Vec<String>,
     envs: Vec<(String, String)>,
@@ -66,7 +66,7 @@ impl<'a> Command<'a> {
         backend: &'a NativeBackend,
         process_tracker: &'a ProcessTracker,
         proxy: Option<&NetworkProxy<N>>,
-        ipc_socket_path: Option<PathBuf>,
+        ipc_endpoint: Option<String>,
         program: impl Into<String>,
     ) -> Self {
         let (proxy_url, proxy_port) = match proxy {
@@ -80,7 +80,7 @@ impl<'a> Command<'a> {
             process_tracker,
             proxy_url,
             proxy_port,
-            ipc_socket_path,
+            ipc_endpoint,
             program: program.into(),
             args: Vec::new(),
             envs: Vec::new(),
@@ -169,13 +169,10 @@ impl<'a> Command<'a> {
             }
         }
 
-        // Inject IPC socket path and update PATH if configured
-        if let Some(ref socket_path) = self.ipc_socket_path {
-            if !envs.iter().any(|(k, _)| k == "LEASH_IPC_SOCKET") {
-                envs.push((
-                    "LEASH_IPC_SOCKET".to_string(),
-                    socket_path.to_string_lossy().to_string(),
-                ));
+        // Inject IPC endpoint and update PATH if configured
+        if let Some(ref endpoint) = self.ipc_endpoint {
+            if !envs.iter().any(|(k, _)| k == "LEASH_IPC_ENDPOINT") {
+                envs.push(("LEASH_IPC_ENDPOINT".to_string(), endpoint.clone()));
             }
 
             // Add .leash/bin to PATH for IPC wrapper scripts

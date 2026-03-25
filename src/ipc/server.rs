@@ -1,15 +1,13 @@
 //! IPC server implementation
 //!
-//! Unix domain socket server for handling IPC requests from sandboxed processes.
+//! Loopback TCP server for handling IPC requests from sandboxed processes.
 
-use std::io;
-use std::path::{Path, PathBuf};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use async_net::unix::UnixListener;
-use blocking::unblock;
+use async_net::TcpListener;
 use executor_core::{Executor, Task};
 use futures_lite::StreamExt;
 use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
@@ -17,11 +15,12 @@ use futures_lite::io::{AsyncReadExt, AsyncWriteExt};
 use crate::ipc::protocol::{IpcError, IpcRequest, IpcResponse};
 use crate::ipc::router::IpcRouter;
 
-/// IPC server that listens on a Unix domain socket
+/// IPC server that listens on 127.0.0.1 with an ephemeral port
 pub struct IpcServer {
     #[allow(dead_code)]
     router: Arc<IpcRouter>,
-    socket_path: PathBuf,
+    addr: SocketAddr,
+    endpoint: String,
     running: Arc<AtomicBool>,
 }
 
@@ -30,42 +29,28 @@ impl IpcServer {
     ///
     /// # Arguments
     /// * `router` - The router to dispatch incoming requests
-    /// * `socket_path` - Path for the Unix domain socket
     /// * `executor` - Executor to spawn the server task on
+    ///
+    /// The server binds to 127.0.0.1 with an ephemeral port.
     pub async fn new<E: Executor + Clone + 'static>(
         router: IpcRouter,
-        socket_path: impl AsRef<Path>,
         executor: E,
     ) -> Result<Self, IpcError> {
-        let socket_path = socket_path.as_ref().to_path_buf();
         let router = Arc::new(router);
         let running = Arc::new(AtomicBool::new(true));
 
-        // Remove existing socket file if present and create parent directory
-        let socket_path_clone = socket_path.clone();
-        unblock(move || {
-            match std::fs::remove_file(&socket_path_clone) {
-                Ok(()) => {}
-                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
-                Err(err) => return Err(err),
-            }
+        // Bind to loopback with an ephemeral port
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let addr = listener.local_addr()?;
+        let endpoint = format!("tcp://{}", addr);
 
-            if let Some(parent) = socket_path_clone.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            Ok(())
-        })
-        .await?;
-
-        // Bind the listener
-        let listener = UnixListener::bind(&socket_path)?;
-
-        tracing::info!(path = %socket_path.display(), "IPC server started");
+        tracing::info!(%endpoint, "IPC server started");
 
         // Spawn the accept loop
         let server = Self {
             router: Arc::clone(&router),
-            socket_path: socket_path.clone(),
+            addr,
+            endpoint,
             running: Arc::clone(&running),
         };
 
@@ -83,29 +68,32 @@ impl IpcServer {
         Ok(server)
     }
 
-    /// Get the socket path
-    pub fn socket_path(&self) -> &Path {
-        &self.socket_path
+    /// Get the listener address.
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
+    }
+
+    /// Get the IPC endpoint string used by clients.
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
     }
 
     /// Stop the server
     pub fn stop(&self) {
         self.running.store(false, Ordering::SeqCst);
-        tracing::debug!(path = %self.socket_path.display(), "IPC server stopping");
+        tracing::debug!(endpoint = %self.endpoint, "IPC server stopping");
     }
 }
 
 impl Drop for IpcServer {
     fn drop(&mut self) {
         self.stop();
-        // Remove the socket file only - directory cleanup is Sandbox's responsibility
-        let _ = std::fs::remove_file(&self.socket_path);
     }
 }
 
 /// Main server accept loop
 async fn run_server<E: Executor + Clone + 'static>(
-    listener: UnixListener,
+    listener: TcpListener,
     router: Arc<IpcRouter>,
     running: Arc<AtomicBool>,
     executor: E,
@@ -138,7 +126,7 @@ async fn run_server<E: Executor + Clone + 'static>(
 }
 
 /// Handle a single connection
-async fn handle_connection(mut stream: async_net::unix::UnixStream, router: Arc<IpcRouter>) {
+async fn handle_connection(mut stream: async_net::TcpStream, router: Arc<IpcRouter>) {
     loop {
         // Read the length prefix (4 bytes, u32 BE)
         let mut len_buf = [0u8; 4];

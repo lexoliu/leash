@@ -25,8 +25,8 @@ pub struct LandlockConfig {
     readable_paths: Vec<PathBuf>,
     executable_paths: Vec<PathBuf>,
     network_deny_all: bool,
+    ipc_port: Option<u16>,
     python_venv_path: Option<PathBuf>,
-    working_dir: PathBuf,
     working_dir: PathBuf,
     filesystem_strict: bool,
     writable_file_system: bool,
@@ -40,6 +40,7 @@ impl LandlockConfig {
             readable_paths: config.readable_paths().to_vec(),
             executable_paths: config.executable_paths().to_vec(),
             network_deny_all: config.network_deny_all(),
+            ipc_port: config.ipc_port(),
             python_venv_path: config.python().map(|p| p.venv().path().to_path_buf()),
             working_dir: config.working_dir().to_path_buf(),
             filesystem_strict: config.filesystem_strict(),
@@ -65,6 +66,10 @@ impl LandlockConfig {
 
     pub fn network_deny_all(&self) -> bool {
         self.network_deny_all
+    }
+
+    pub fn ipc_port(&self) -> Option<u16> {
+        self.ipc_port
     }
 
     pub fn python_venv_path(&self) -> Option<&Path> {
@@ -129,7 +134,7 @@ pub fn build_ruleset(config: &LandlockConfig, proxy_port: u16) -> Result<Prepare
         .handle_access(fs_access)
         .map_err(|e| Error::InvalidProfile(format!("Landlock fs access error: {}", e)))?;
 
-    if !config.network_deny_all() {
+    if !config.network_deny_all() || config.ipc_port().is_some() {
         ruleset = ruleset
             .handle_access(net_access)
             .map_err(|e| Error::InvalidProfile(format!("Landlock net access error: {}", e)))?;
@@ -232,9 +237,15 @@ pub fn build_ruleset(config: &LandlockConfig, proxy_port: u16) -> Result<Prepare
             .add_rule(NetPort::new(proxy_port, AccessNet::ConnectTcp))
             .map_err(|e| Error::InvalidProfile(format!("Landlock network rule error: {}", e)))?;
     }
+    if let Some(ipc_port) = config.ipc_port() {
+        ruleset = ruleset
+            .add_rule(NetPort::new(ipc_port, AccessNet::ConnectTcp))
+            .map_err(|e| Error::InvalidProfile(format!("Landlock IPC rule error: {}", e)))?;
+    }
 
     tracing::debug!(
         proxy_port = proxy_port,
+        ipc_port = config.ipc_port(),
         working_dir = %config.working_dir().display(),
         "landlock: ruleset built"
     );

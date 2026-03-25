@@ -29,7 +29,6 @@
 (allow mach-lookup (global-name "com.apple.dyld.closured"))                   ; dyld closure daemon
 
 ; XPC and launchd services (pattern match for essential XPC)
-(allow mach-lookup (global-name-prefix "com.apple.xpc."))                     ; XPC services
 
 ; Distributed notifications (various versions)
 (allow mach-lookup (global-name "com.apple.distributed_notifications@1v3"))
@@ -91,24 +90,11 @@
 ; =============================================================================
 ; File system access
 ; =============================================================================
-{% if filesystem_strict %}
-; Strict filesystem: allow reads only for system binaries/libs and configured paths
-(allow file-read* (subpath "/bin"))
-(allow file-read* (subpath "/sbin"))
-(allow file-read* (subpath "/usr/bin"))
-(allow file-read* (subpath "/usr/sbin"))
-(allow file-read* (subpath "/usr/lib"))
-(allow file-read* (subpath "/usr/libexec"))
-(allow file-read* (subpath "/System/Library"))
-(allow file-read* (subpath "/Library"))
-(allow file-read* (subpath "/opt/homebrew"))
-(allow file-read* (subpath "/usr/local"))
-(allow file-read* (subpath "/Applications"))
-    {% else %}
-    ; Allow file reads broadly - macOS has too many interconnected paths to enumerate
-    ; Sensitive paths are denied below with specific rules
-    (allow file-read*)
-    {% endif %}
+; Allow file reads broadly on macOS.
+; Modern macOS runtime dependencies are not stably enumerable across releases
+; because dyld, cryptexes, and other system resources move between sealed roots.
+; Sensitive paths are denied below with explicit rules, while writes stay scoped.
+(allow file-read*)
 
     {% if writable_file_system %}
     ; Permissive mode: Allow global write access
@@ -208,11 +194,13 @@
 ; Network: deny by default; optionally allow proxy port
 ; =============================================================================
 (deny network*)
-; Always allow local Unix sockets for IPC (sandboxed processes need to talk to host)
-(allow network* (local unix-socket))
+{% if let Some(ipc_port) = ipc_port %}
+; Allow IPC endpoint only (sandbox-local leash IPC server)
+(allow network-outbound (remote ip "localhost:{{ ipc_port }}"))
+{% endif %}
 {% if !network_deny_all %}
 ; Allow outbound network through proxy when network mode is enabled
-(allow network* (remote ip "localhost:{{ proxy_port }}"))
+(allow network-outbound (remote ip "localhost:{{ proxy_port }}"))
 {% endif %}
 
 ; =============================================================================

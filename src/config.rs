@@ -233,6 +233,9 @@ pub struct SandboxConfigData {
     pub(crate) env_passthrough: Vec<String>,
     pub(crate) limits: ResourceLimits,
     pub(crate) ipc: Option<IpcRouter>,
+    /// Runtime IPC TCP port selected by the sandbox server.
+    /// `None` means IPC is disabled.
+    pub(crate) ipc_port: Option<u16>,
     /// Whether to allow writing to /dev/tty (controlling terminal).
     /// When false, all output must go through stdout/stderr pipes.
     pub(crate) allow_tty_write: bool,
@@ -287,8 +290,16 @@ impl SandboxConfigData {
         self.ipc.as_ref()
     }
 
+    pub fn ipc_port(&self) -> Option<u16> {
+        self.ipc_port
+    }
+
     pub fn allow_tty_write(&self) -> bool {
         self.allow_tty_write
+    }
+
+    pub(crate) fn set_ipc_port(&mut self, port: Option<u16>) {
+        self.ipc_port = port;
     }
 }
 
@@ -347,6 +358,7 @@ impl<N: NetworkPolicy> SandboxConfig<N> {
                 env_passthrough: self.env_passthrough,
                 limits: self.limits,
                 ipc: self.ipc,
+                ipc_port: None,
                 allow_tty_write: self.allow_tty_write,
             },
         )
@@ -430,7 +442,7 @@ impl Default for SandboxConfigBuilder<DenyAll> {
             network_deny_all: true,
             python: None,
             working_dir: None, // Will generate random name on build()
-            filesystem_strict: false,
+            filesystem_strict: true,
             writable_file_system: false,
             env_passthrough: Vec::new(),
             limits: ResourceLimits::default(),

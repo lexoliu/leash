@@ -40,12 +40,16 @@ fn seccomp_error_to_io(error: seccompiler::Error) -> std::io::Error {
 }
 
 /// Build a Seccomp BPF filter from SecurityConfig
-pub fn build_filter(security: &SecurityConfig, network_deny_all: bool) -> Result<PreparedFilter> {
+pub fn build_filter(
+    security: &SecurityConfig,
+    network_deny_all: bool,
+    ipc_enabled: bool,
+) -> Result<PreparedFilter> {
     let arch = detect_arch()?;
 
     // We use a default-allow policy with explicit blocks for dangerous syscalls
     // This is more practical than default-deny for a general-purpose sandbox
-    let rules = build_rules(security, arch, network_deny_all)?;
+    let rules = build_rules(security, arch, network_deny_all, ipc_enabled)?;
 
     let filter = SeccompFilter::new(
         rules,
@@ -85,12 +89,13 @@ fn build_rules(
     security: &SecurityConfig,
     arch: TargetArch,
     network_deny_all: bool,
+    ipc_enabled: bool,
 ) -> Result<BTreeMap<i64, Vec<SeccompRule>>> {
     let mut rules: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
 
     // --- CRITICAL: Network socket filtering ---
     // Block non-TCP socket creation to enforce complete network isolation
-    add_socket_restrictions(&mut rules, arch, network_deny_all)?;
+    add_socket_restrictions(&mut rules, arch, network_deny_all, ipc_enabled)?;
 
     // --- Block dangerous syscalls ---
     add_dangerous_syscall_blocks(&mut rules)?;
@@ -114,6 +119,7 @@ fn add_socket_restrictions(
     rules: &mut BTreeMap<i64, Vec<SeccompRule>>,
     _arch: TargetArch,
     network_deny_all: bool,
+    ipc_enabled: bool,
 ) -> Result<()> {
     // socket() syscall: int socket(int domain, int type, int protocol)
     // arg0 = domain (AF_INET, AF_INET6, AF_UNIX, etc.)
@@ -257,7 +263,7 @@ fn add_socket_restrictions(
         );
     }
 
-    if network_deny_all {
+    if network_deny_all && !ipc_enabled {
         // Block TCP sockets (AF_INET/AF_INET6 + SOCK_STREAM variants)
         for &sock_type in &stream_types {
             // AF_INET + SOCK_STREAM

@@ -1,8 +1,6 @@
 use std::path::Path;
 use std::process::Output;
 
-use anyhow::Result;
-
 use leash::{
     AllowAll, AllowList, Command, DenyAll, PtyExitStatus, PythonConfig, Sandbox, SandboxConfig,
     SandboxConfigBuilder, VenvConfig,
@@ -10,6 +8,7 @@ use leash::{
 
 use crate::cli::NetworkMode;
 use crate::config::MergedConfig;
+use crate::error::{CliError, CliResult};
 
 /// Type-erased sandbox handle for CLI use
 ///
@@ -90,7 +89,7 @@ impl SandboxHandle {
 }
 
 /// Create a sandbox from merged configuration
-pub async fn create_sandbox(config: &MergedConfig) -> Result<SandboxHandle> {
+pub async fn create_sandbox(config: &MergedConfig) -> CliResult<SandboxHandle> {
     match config.network_mode {
         NetworkMode::Deny => {
             let sandbox_config = build_config(SandboxConfigBuilder::default(), config)?;
@@ -105,7 +104,7 @@ pub async fn create_sandbox(config: &MergedConfig) -> Result<SandboxHandle> {
         }
         NetworkMode::AllowList => {
             if config.allow_domains.is_empty() {
-                anyhow::bail!("--network allow-list requires at least one --allow-domain");
+                return Err(CliError::MissingAllowDomains);
             }
             let policy = AllowList::new(config.allow_domains.iter().cloned());
             let sandbox_config =
@@ -120,7 +119,7 @@ pub async fn create_sandbox(config: &MergedConfig) -> Result<SandboxHandle> {
 fn build_config<N: leash::NetworkPolicy>(
     builder: SandboxConfigBuilder<N>,
     config: &MergedConfig,
-) -> Result<SandboxConfig<N>> {
+) -> CliResult<SandboxConfig<N>> {
     let mut builder = builder
         .security(config.security.clone())
         .limits(config.limits.clone())

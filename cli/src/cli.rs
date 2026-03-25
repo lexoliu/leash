@@ -28,6 +28,9 @@ pub enum Commands {
 
     /// Run Python in the sandbox (REPL if no script)
     Python(PythonArgs),
+
+    /// Invoke an IPC command inside a leash environment
+    Ipc(IpcArgs),
 }
 
 #[derive(Args)]
@@ -88,6 +91,16 @@ pub struct PythonArgs {
 
     #[command(flatten)]
     pub common: CommonArgs,
+}
+
+#[derive(Args)]
+pub struct IpcArgs {
+    /// IPC command name to invoke
+    pub command: String,
+
+    /// Arguments forwarded to the IPC command
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    pub args: Vec<String>,
 }
 
 /// Common arguments shared across subcommands

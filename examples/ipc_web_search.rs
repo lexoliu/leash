@@ -10,6 +10,26 @@
 
 use leash::{IpcCommand, IpcRouter, Sandbox, SandboxConfig};
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum CommandPayload {
+    Text { content: String },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommandEnvelope {
+    ok: bool,
+    payload: Option<CommandPayload>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CliArgsPayload {
+    args: Vec<String>,
+}
 
 /// WebSearch command - sent from sandbox to host
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -30,22 +50,32 @@ struct SearchItem {
 }
 
 impl IpcCommand for WebSearch {
-    type Response = WebSearchResult;
+    type Response = CommandEnvelope;
 
     fn name(&self) -> String {
         "web_search".to_string()
     }
 
+    fn positional_args(&self) -> Cow<'static, [Cow<'static, str>]> {
+        Cow::Borrowed(&[Cow::Borrowed("query")])
+    }
+
     fn apply_args(&mut self, params: &[u8]) -> Result<(), leash::rmp_serde::decode::Error> {
-        *self = leash::rmp_serde::from_slice(params)?;
+        let payload: CliArgsPayload = leash::rmp_serde::from_slice(params)?;
+        let mut args = payload.args.into_iter();
+        while let Some(arg) = args.next() {
+            if arg == "--query" {
+                self.query = args.next().unwrap_or_default();
+            }
+        }
         Ok(())
     }
 
-    async fn handle(&mut self) -> WebSearchResult {
+    async fn handle(&mut self) -> CommandEnvelope {
         println!("[Host] Received web_search: {:?}", self.query);
 
         // Mock results (real implementation would call a search API)
-        WebSearchResult {
+        let result = WebSearchResult {
             items: vec![
                 SearchItem {
                     title: format!("Result 1 for '{}'", self.query),
@@ -56,6 +86,18 @@ impl IpcCommand for WebSearch {
                     url: "https://example.com/2".to_string(),
                 },
             ],
+        };
+        let content = result
+            .items
+            .iter()
+            .map(|item| format!("{} | {}", item.title, item.url))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        CommandEnvelope {
+            ok: true,
+            payload: Some(CommandPayload::Text { content }),
+            error: None,
         }
     }
 }
@@ -67,23 +109,16 @@ async fn main() -> leash::Result<()> {
     // Create router and register WebSearch command
     let router = IpcRouter::new().register(WebSearch::default());
 
-    // Path to leash-ipc binary
-    let leash_ipc = std::env::current_dir()?.join("target/debug/leash-ipc");
-
     // Create sandbox with IPC enabled, using tokio executor
-    let config = SandboxConfig::builder()
-        .ipc(router)
-        .executable_path(&leash_ipc)
-        .build()?;
+    let config = SandboxConfig::builder().ipc(router).build()?;
     let sandbox =
         Sandbox::with_config_and_executor(config, executor_core::tokio::TokioGlobal).await?;
 
     println!("Sandbox: {}", sandbox.working_dir().display());
 
-    // Call web_search from sandbox via leash-ipc
+    // Call web_search from sandbox via the generated IPC wrapper command.
     let output = sandbox
-        .command(leash_ipc.to_string_lossy())
-        .arg("web_search")
+        .command("web_search")
         .arg("--query")
         .arg("rust async programming")
         .output()

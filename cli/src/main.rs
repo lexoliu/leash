@@ -54,5 +54,6 @@ async fn async_main(cli: Cli) -> CliResult<()> {
             let config = merge_config(file_config, &args.common)?;
             commands::python::execute(args, config).await
         }
+        Commands::Ipc(args) => commands::ipc::execute(args).await,
     }
 }
