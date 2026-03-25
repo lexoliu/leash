@@ -154,30 +154,34 @@ where
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_deny_all() {
-        let policy = DenyAll;
-        let request = DomainRequest::new(
-            "example.com".to_string(),
-            443,
-            ConnectionDirection::Outbound,
-            1234,
-        );
+    #[test]
+    fn test_deny_all() {
+        smol::block_on(async {
+            let policy = DenyAll;
+            let request = DomainRequest::new(
+                "example.com".to_string(),
+                443,
+                ConnectionDirection::Outbound,
+                1234,
+            );
 
-        assert!(!policy.check(&request).await);
+            assert!(!policy.check(&request).await);
+        });
     }
 
-    #[tokio::test]
-    async fn test_allow_all() {
-        let policy = AllowAll;
-        let request = DomainRequest::new(
-            "example.com".to_string(),
-            443,
-            ConnectionDirection::Outbound,
-            1234,
-        );
+    #[test]
+    fn test_allow_all() {
+        smol::block_on(async {
+            let policy = AllowAll;
+            let request = DomainRequest::new(
+                "example.com".to_string(),
+                443,
+                ConnectionDirection::Outbound,
+                1234,
+            );
 
-        assert!(policy.check(&request).await);
+            assert!(policy.check(&request).await);
+        });
     }
 
     #[test]
