@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1](https://github.com/lexoliu/heel/compare/heel-v0.1.0...heel-v0.1.1) - 2026-03-30
+
+### Other
+
+- always evaluate release asset upload gate
+- allow release backfill dispatch to resolve tag
+- add release asset backfill dispatch
+- upload release assets from release workflow
+
 ## [0.1.0](https://github.com/lexoliu/heel/compare/heel-v0.0.1...heel-v0.1.0) - 2026-03-25
 
 ### Added
