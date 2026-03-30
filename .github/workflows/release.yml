@@ -51,6 +51,7 @@ jobs:
 
   resolve-release:
     name: Resolve Release Tag
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     needs: release-plz
     outputs:
